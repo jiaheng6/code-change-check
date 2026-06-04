@@ -21,13 +21,27 @@ description: 用于检查 AI 或人工完成的代码变更质量，发现需求
 在目标项目根目录运行：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --output code-change-check-output
 ```
+
+PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File path/to/code-change-check/run-code-change-check.ps1 --project . --output code-change-check-output
+```
+
+macOS/Linux：
+
+```bash
+sh path/to/code-change-check/run-code-change-check.sh --project . --output code-change-check-output
+```
+
+启动器会先检测可用的 Python 3.10+。Windows 会检测 `python` 和 `py -3`，macOS/Linux 会检测 `python3` 和 `python`；如果没有，会提示用户先安装 Python。
 
 交互选择本次迭代包含的提交记录：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --interactive --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --interactive --output code-change-check-output
 ```
 
 交互模式支持方向键移动、空格多选、回车提交、`q` 取消。Git 会展示最近提交记录，SVN 会展示最近版本记录。可用 `--commit-limit 50` 调整展示数量。
@@ -35,31 +49,31 @@ python path/to/code-change-check/scripts/code_change_check.py --project . --inte
 如果项目中能发现需求、设计或任务文档，交互模式会继续让用户把每个提交关联到对应需求/任务。需要跳过时使用：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --interactive --no-map-requirements --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --interactive --no-map-requirements --output code-change-check-output
 ```
 
 指定需求文档：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --spec docs/spec.md --spec tasks.md --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --spec docs/spec.md --spec tasks.md --output code-change-check-output
 ```
 
 检查 Git 某个迭代范围：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --base-ref main --target-ref HEAD --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --base-ref main --target-ref HEAD --output code-change-check-output
 ```
 
 检查 SVN 版本范围：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --svn-revision 100:120 --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --svn-revision 100:120 --output code-change-check-output
 ```
 
 比较两个目录快照：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project after --baseline before --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project after --baseline before --output code-change-check-output
 ```
 
 ## 审查重点

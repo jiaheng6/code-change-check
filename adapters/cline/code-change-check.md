@@ -12,13 +12,25 @@
 需要提取证据时，运行：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --output code-change-check-output
+```
+
+PowerShell 可使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File path/to/code-change-check/run-code-change-check.ps1 --project . --output code-change-check-output
+```
+
+macOS/Linux 可使用：
+
+```bash
+sh path/to/code-change-check/run-code-change-check.sh --project . --output code-change-check-output
 ```
 
 如果用户没有明确给出版本范围，优先使用交互式提交选择：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --interactive --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --interactive --output code-change-check-output
 ```
 
 交互模式支持方向键移动、空格多选、回车提交、`q` 取消。
@@ -28,14 +40,14 @@ python path/to/code-change-check/scripts/code_change_check.py --project . --inte
 如果用户提供需求、设计或任务文档，使用：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --spec docs/spec.md --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --spec docs/spec.md --output code-change-check-output
 ```
 
 如果用户指定 Git 或 SVN 迭代范围，使用：
 
 ```bash
-python path/to/code-change-check/scripts/code_change_check.py --project . --base-ref main --target-ref HEAD --output code-change-check-output
-python path/to/code-change-check/scripts/code_change_check.py --project . --svn-revision 100:120 --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --base-ref main --target-ref HEAD --output code-change-check-output
+path/to/code-change-check/run-code-change-check.cmd --project . --svn-revision 100:120 --output code-change-check-output
 ```
 
 输出必须包含：
