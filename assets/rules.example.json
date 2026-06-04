@@ -1,0 +1,20 @@
+{
+  "riskPatterns": [
+    {
+      "id": "internal-address-rule",
+      "title": "内部调用疑似使用公网地址",
+      "severity": "critical",
+      "category": "寻址",
+      "regex": "publicBaseUrl|PUBLIC_BASE_URL|https://api\\.example\\.com",
+      "message": "内部服务调用必须核对是否应使用 internalBaseUrl 或内部服务发现。"
+    },
+    {
+      "id": "tenant-isolation-rule",
+      "title": "租户隔离线索",
+      "severity": "high",
+      "category": "权限",
+      "regex": "tenantId|tenant_id|organizationId|org_id",
+      "message": "涉及租户字段，需核对查询、写入和权限判断是否完整。"
+    }
+  ]
+}
