@@ -23,6 +23,8 @@ python path/to/code-change-check/scripts/code_change_check.py --project . --inte
 
 交互模式支持方向键移动、空格多选、回车提交、`q` 取消。
 
+如果发现需求、设计或任务文档，交互模式会继续让用户把每个提交关联到对应需求/任务。用户明确不需要时追加 `--no-map-requirements`。
+
 如果用户提供需求、设计或任务文档，使用：
 
 ```bash
@@ -44,3 +46,4 @@ python path/to/code-change-check/scripts/code_change_check.py --project . --svn-
 - 文件、行号和风险原因。
 - 需要补充的测试或运行验证。
 - 需求、设计、任务和代码之间的缺口。
+- 需求-提交映射缺口。

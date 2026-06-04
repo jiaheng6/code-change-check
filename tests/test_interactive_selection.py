@@ -87,6 +87,66 @@ class InteractiveSelectionTest(unittest.TestCase):
             ],
         )
 
+    def test_build_requirement_items_keeps_source_location(self):
+        specs = [
+            {
+                "file": "docs/spec.md",
+                "headings": [{"line": 1, "text": "订单改造"}],
+                "tasks": [{"line": 5, "text": "修复内部寻址"}],
+                "key_lines": [{"line": 9, "text": "内部调用必须走 internalBaseUrl"}],
+            }
+        ]
+
+        items = self.tool.build_requirement_items(specs)
+
+        self.assertEqual(items[0]["id"], "R1")
+        self.assertEqual(items[0]["kind"], "heading")
+        self.assertEqual(items[0]["file"], "docs/spec.md")
+        self.assertEqual(items[0]["line"], 1)
+        self.assertIn("订单改造", items[0]["label"])
+        self.assertEqual(items[1]["id"], "R2")
+        self.assertEqual(items[1]["kind"], "task")
+        self.assertIn("修复内部寻址", items[1]["label"])
+
+    def test_create_requirement_commit_mappings_uses_selected_requirements(self):
+        commits = [
+            {
+                "id": "abcdef123456",
+                "short_id": "abcdef1",
+                "date": "2026-06-04",
+                "message": "修复内部寻址",
+            }
+        ]
+        requirements = [
+            {
+                "id": "R1",
+                "label": "R1 task docs/spec.md:L5 修复内部寻址",
+                "file": "docs/spec.md",
+                "line": 5,
+                "kind": "task",
+                "text": "修复内部寻址",
+            },
+            {
+                "id": "R2",
+                "label": "R2 constraint docs/spec.md:L9 内部调用必须走 internalBaseUrl",
+                "file": "docs/spec.md",
+                "line": 9,
+                "kind": "constraint",
+                "text": "内部调用必须走 internalBaseUrl",
+            },
+        ]
+
+        mappings = self.tool.create_requirement_commit_mappings(
+            commits,
+            requirements,
+            choose_for_commit=lambda commit, labels: [labels[1]],
+        )
+
+        self.assertEqual(len(mappings), 1)
+        self.assertEqual(mappings[0]["commit"]["short_id"], "abcdef1")
+        self.assertEqual(mappings[0]["requirements"][0]["id"], "R2")
+        self.assertEqual(mappings[0]["requirements"][0]["line"], 9)
+
 
 if __name__ == "__main__":
     unittest.main()

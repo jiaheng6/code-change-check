@@ -727,6 +727,65 @@ def extract_spec_summary(project: Path, spec_files: list[Path]) -> list[dict]:
     return summaries
 
 
+def build_requirement_items(specs: list[dict]) -> list[dict]:
+    items = []
+    kinds = [
+        ("headings", "heading", "标题"),
+        ("tasks", "task", "任务"),
+        ("key_lines", "constraint", "约束"),
+    ]
+    for spec in specs:
+        file = spec["file"]
+        for source_key, kind, kind_label in kinds:
+            for source_item in spec.get(source_key, []):
+                item_id = f"R{len(items) + 1}"
+                text = source_item["text"].strip()
+                line = source_item["line"]
+                label = f"{item_id} {kind_label} {file}:L{line} {text[:120]}"
+                items.append(
+                    {
+                        "id": item_id,
+                        "kind": kind,
+                        "kind_label": kind_label,
+                        "file": file,
+                        "line": line,
+                        "text": text,
+                        "label": label,
+                    }
+                )
+    return items
+
+
+def create_requirement_commit_mappings(
+    commits: list[dict],
+    requirements: list[dict],
+    choose_for_commit=None,
+) -> list[dict]:
+    if not commits or not requirements:
+        return []
+    labels = [requirement["label"] for requirement in requirements]
+    label_to_requirement = {requirement["label"]: requirement for requirement in requirements}
+    mappings = []
+    for commit in commits:
+        if choose_for_commit is None:
+            title = f"请选择提交 {commit.get('short_id', commit.get('id', ''))} 对应的需求/任务"
+            selected_labels = choose_items(title, labels)
+        else:
+            selected_labels = choose_for_commit(commit, labels)
+        selected_requirements = [
+            label_to_requirement[label]
+            for label in selected_labels
+            if label in label_to_requirement
+        ]
+        mappings.append(
+            {
+                "commit": commit,
+                "requirements": selected_requirements,
+            }
+        )
+    return mappings
+
+
 def load_custom_patterns(rules_path: Path | None) -> list[RiskPattern]:
     if rules_path is None:
         return []
@@ -868,6 +927,42 @@ def make_report(data: dict) -> str:
         else:
             lines.append("- 未选择提交记录。")
 
+    lines.extend(["", "## 需求-提交映射", ""])
+    mappings = data.get("requirement_commit_mappings", [])
+    if mappings:
+        mapped_requirement_ids = set()
+        for mapping in mappings:
+            commit = mapping["commit"]
+            requirements = mapping["requirements"]
+            lines.append(
+                f"### `{commit.get('short_id', commit.get('id', ''))}` {commit.get('message', '')}"
+            )
+            if requirements:
+                for requirement in requirements:
+                    mapped_requirement_ids.add(requirement["id"])
+                    lines.append(
+                        f"- `{requirement['id']}` {requirement['kind_label']} `{requirement['file']}:L{requirement['line']}` {requirement['text']}"
+                    )
+            else:
+                lines.append("- 未关联需求或任务。")
+            lines.append("")
+
+        unmapped_requirements = [
+            requirement
+            for requirement in data.get("requirement_items", [])
+            if requirement["id"] not in mapped_requirement_ids
+        ]
+        if unmapped_requirements:
+            lines.append("### 未关联提交的需求/任务")
+            for requirement in unmapped_requirements[:50]:
+                lines.append(
+                    f"- `{requirement['id']}` {requirement['kind_label']} `{requirement['file']}:L{requirement['line']}` {requirement['text']}"
+                )
+            if len(unmapped_requirements) > 50:
+                lines.append(f"- 其余 {len(unmapped_requirements) - 50} 条略。")
+    else:
+        lines.append("- 未生成需求-提交映射。交互选择提交后可启用映射。")
+
     lines.extend(["", "## 需求和任务线索", ""])
     if data["specs"]:
         for spec in data["specs"]:
@@ -944,6 +1039,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--svn-revision", help="SVN 版本范围，例如 100:120")
     parser.add_argument("--interactive", action="store_true", help="交互式选择本次迭代包含的 Git 提交或 SVN 版本")
     parser.add_argument("--commit-limit", type=int, default=30, help="交互模式展示的最近提交/版本数量")
+    parser.add_argument("--map-requirements", action="store_true", help="为选中的提交交互式关联需求/任务")
+    parser.add_argument("--no-map-requirements", action="store_true", help="交互模式下跳过需求-提交映射")
     parser.add_argument("--spec", action="append", default=[], help="需求、设计或任务文档，可重复传入")
     parser.add_argument("--rules", help="自定义 JSON 风险规则文件")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
@@ -972,6 +1069,18 @@ def main(argv: list[str]) -> int:
         changes = collect_changes(project, baseline, args.base_ref, args.target_ref, args.svn_revision)
     spec_files = discover_spec_files(project, args.spec)
     specs = extract_spec_summary(project, spec_files)
+    requirement_items = build_requirement_items(specs)
+    should_map_requirements = (
+        bool(changes.get("selected_commits"))
+        and requirement_items
+        and not args.no_map_requirements
+        and (args.interactive or args.map_requirements)
+    )
+    requirement_commit_mappings = (
+        create_requirement_commit_mappings(changes.get("selected_commits", []), requirement_items)
+        if should_map_requirements
+        else []
+    )
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
 
     data = {
@@ -979,6 +1088,8 @@ def main(argv: list[str]) -> int:
         "project": str(project),
         "changes": changes,
         "specs": specs,
+        "requirement_items": requirement_items,
+        "requirement_commit_mappings": requirement_commit_mappings,
         "findings": [dataclasses.asdict(finding) for finding in findings],
         "summary": summarize_findings(findings),
         "mermaid": build_mermaid(findings),

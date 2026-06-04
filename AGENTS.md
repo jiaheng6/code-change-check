@@ -13,6 +13,7 @@
 - `references/` 放按需读取的详细说明。
 - `assets/` 放示例规则和模板。
 - `adapters/` 放 Claude Code、Codex、Cline 之外的轻量适配入口。
+- 修改需求、提交、风险或报告结构时，同步更新 `references/report-schema.md`。
 
 ## 验证命令
 

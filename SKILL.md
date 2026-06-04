@@ -32,6 +32,12 @@ python path/to/code-change-check/scripts/code_change_check.py --project . --inte
 
 交互模式支持方向键移动、空格多选、回车提交、`q` 取消。Git 会展示最近提交记录，SVN 会展示最近版本记录。可用 `--commit-limit 50` 调整展示数量。
 
+如果项目中能发现需求、设计或任务文档，交互模式会继续让用户把每个提交关联到对应需求/任务。需要跳过时使用：
+
+```bash
+python path/to/code-change-check/scripts/code_change_check.py --project . --interactive --no-map-requirements --output code-change-check-output
+```
+
 指定需求文档：
 
 ```bash
@@ -78,5 +84,6 @@ python path/to/code-change-check/scripts/code_change_check.py --project after --
 3. 人工优先阅读位置：文件和行号。
 4. 需要补测或运行验证的路径。
 5. 需求、设计、任务和代码之间的缺口。
+6. 需求-提交映射，以及没有关联需求的提交、没有关联提交的需求。
 
 如果报告证据不足，明确说明缺少什么证据，而不是凭感觉判断安全。
