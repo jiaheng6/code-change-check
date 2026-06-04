@@ -10,7 +10,7 @@
 
 ## 步骤
 
-1. 确认变更来源：Git 优先，其次 SVN；没有版本管理时使用目录快照。Git 可通过 `--base-ref` 和 `--target-ref` 检查一次迭代范围，SVN 可通过 `--svn-revision` 检查版本范围。
+1. 确认变更来源：Git 优先，其次 SVN；没有版本管理时使用目录快照。优先使用 `--interactive` 让用户用方向键、空格和回车选择本次迭代包含的提交记录。Git 也可通过 `--base-ref` 和 `--target-ref` 检查一次迭代范围，SVN 也可通过 `--svn-revision` 检查版本范围。
 2. 收集需求证据：读取 OpenSpec、spec-kit、superpowers、Markdown、todo 和用户补充说明。
 3. 提取代码证据：变更文件、HTTP/RPC 调用、数据库写入、配置读取、权限、状态、金额、第三方对接。
 4. 生成证据包：使用 JSON 保存原始线索，使用 Markdown 保存人工阅读报告。

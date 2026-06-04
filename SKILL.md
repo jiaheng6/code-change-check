@@ -24,6 +24,14 @@ description: 用于检查 AI 或人工完成的代码变更质量，发现需求
 python path/to/code-change-check/scripts/code_change_check.py --project . --output code-change-check-output
 ```
 
+交互选择本次迭代包含的提交记录：
+
+```bash
+python path/to/code-change-check/scripts/code_change_check.py --project . --interactive --output code-change-check-output
+```
+
+交互模式支持方向键移动、空格多选、回车提交、`q` 取消。Git 会展示最近提交记录，SVN 会展示最近版本记录。可用 `--commit-limit 50` 调整展示数量。
+
 指定需求文档：
 
 ```bash

@@ -17,3 +17,4 @@
 ## 验证命令
 
 - 自检：`python scripts/code_change_check.py --project . --output code-change-check-output --scan-all`
+- 单元测试：`python tests/test_interactive_selection.py`

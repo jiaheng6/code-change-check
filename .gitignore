@@ -3,5 +3,5 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-code-change-check-output/
+code-change-check-output*/
 *.log

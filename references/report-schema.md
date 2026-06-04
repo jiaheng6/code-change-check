@@ -7,6 +7,7 @@
 - `generated_at`：生成时间。
 - `project`：项目路径。
 - `changes`：变更来源、状态、diff 和变更文件。
+- `changes.selected_commits`：交互模式下用户选择的 Git 提交或 SVN 版本。
 - `specs`：需求、设计、任务文档摘要。
 - `findings`：风险命中列表。
 - `summary`：按严重程度、类型、文件聚合的统计。

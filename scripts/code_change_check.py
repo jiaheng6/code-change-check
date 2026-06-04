@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -109,6 +110,12 @@ class Finding:
     message: str
 
 
+@dataclasses.dataclass
+class MultiSelectState:
+    cursor: int
+    selected: set[int]
+
+
 DEFAULT_RISK_PATTERNS = [
     RiskPattern(
         id="external-address",
@@ -202,6 +209,152 @@ def run_command(args: list[str], cwd: Path) -> tuple[int, str]:
         return 127, f"命令不存在：{args[0]}"
 
 
+def apply_multiselect_key(state: MultiSelectState, key: str, item_count: int) -> str:
+    if item_count <= 0:
+        return "submit" if key == "enter" else "continue"
+    if key in {"up", "k"}:
+        state.cursor = (state.cursor - 1) % item_count
+        return "continue"
+    if key in {"down", "j"}:
+        state.cursor = (state.cursor + 1) % item_count
+        return "continue"
+    if key == "space":
+        if state.cursor in state.selected:
+            state.selected.remove(state.cursor)
+        else:
+            state.selected.add(state.cursor)
+        return "continue"
+    if key == "enter":
+        return "submit"
+    if key in {"q", "esc", "ctrl_c"}:
+        return "cancel"
+    return "continue"
+
+
+def render_multiselect(
+    title: str,
+    items: list[str],
+    state: MultiSelectState,
+    output,
+    clear_screen: bool,
+) -> None:
+    if clear_screen:
+        output.write("\x1b[2J\x1b[H")
+    output.write(f"{title}\n\n")
+    output.write("使用 ↑/↓ 移动，空格选择/取消，回车提交，q 取消。\n\n")
+    if not items:
+        output.write("没有可选择的记录。\n")
+        output.flush()
+        return
+    for index, item in enumerate(items):
+        cursor = ">" if index == state.cursor else " "
+        checked = "[x]" if index in state.selected else "[ ]"
+        output.write(f"{cursor} {checked} {item}\n")
+    output.flush()
+
+
+def run_multiselect(
+    title: str,
+    items: list[str],
+    read_key,
+    output,
+    clear_screen: bool = True,
+) -> list[str]:
+    state = MultiSelectState(cursor=0, selected=set())
+    while True:
+        render_multiselect(title, items, state, output, clear_screen)
+        action = apply_multiselect_key(state, read_key(), len(items))
+        if action == "submit":
+            if clear_screen:
+                output.write("\x1b[2J\x1b[H")
+            return [item for index, item in enumerate(items) if index in state.selected]
+        if action == "cancel":
+            if clear_screen:
+                output.write("\x1b[2J\x1b[H")
+            return []
+
+
+def read_terminal_key() -> str:
+    if os.name == "nt":
+        import msvcrt
+
+        char = msvcrt.getwch()
+        if char in {"\x00", "\xe0"}:
+            second = msvcrt.getwch()
+            return {"H": "up", "P": "down", "K": "left", "M": "right"}.get(second, second)
+        if char in {"\r", "\n"}:
+            return "enter"
+        if char == " ":
+            return "space"
+        if char == "\x03":
+            return "ctrl_c"
+        if char == "\x1b":
+            return "esc"
+        return char.lower()
+
+    import select
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        char = sys.stdin.read(1)
+        if char == "\x1b":
+            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+            rest = sys.stdin.read(2) if ready else ""
+            if rest == "[A":
+                return "up"
+            if rest == "[B":
+                return "down"
+            return "esc"
+        if char in {"\r", "\n"}:
+            return "enter"
+        if char == " ":
+            return "space"
+        if char == "\x03":
+            return "ctrl_c"
+        return char.lower()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def parse_number_selection(raw: str, item_count: int) -> set[int]:
+    selected: set[int] = set()
+    for part in raw.replace("，", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start_text, end_text = part.split("-", 1)
+            start = int(start_text)
+            end = int(end_text)
+            for value in range(min(start, end), max(start, end) + 1):
+                if 1 <= value <= item_count:
+                    selected.add(value - 1)
+        else:
+            value = int(part)
+            if 1 <= value <= item_count:
+                selected.add(value - 1)
+    return selected
+
+
+def choose_items(title: str, items: list[str]) -> list[str]:
+    if not items:
+        print("没有可选择的记录。")
+        return []
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        return run_multiselect(title, items, read_terminal_key, sys.stdout)
+
+    print(title)
+    for index, item in enumerate(items, start=1):
+        print(f"[{index}] {item}")
+    raw = input("请输入序号，支持 1,2,3 或 1-5：").strip()
+    selected_indexes = parse_number_selection(raw, len(items))
+    return [item for index, item in enumerate(items) if index in selected_indexes]
+
+
 def is_git_repo(project: Path) -> bool:
     code, _ = run_command(["git", "rev-parse", "--is-inside-work-tree"], project)
     return code == 0
@@ -237,6 +390,164 @@ def iter_project_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if path.is_file() and not should_skip(path.relative_to(root)) and is_text_file(path):
             yield path
+
+
+def parse_git_log_records(raw: str) -> list[dict]:
+    records = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\x1f", 3)
+        if len(parts) != 4:
+            continue
+        records.append(
+            {
+                "id": parts[0],
+                "short_id": parts[1],
+                "date": parts[2],
+                "message": parts[3],
+            }
+        )
+    return records
+
+
+def parse_svn_log_records(raw: str) -> list[dict]:
+    records = []
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return records
+    for entry in root.findall("logentry"):
+        revision = entry.attrib.get("revision", "")
+        date = (entry.findtext("date") or "")[:10]
+        message = (entry.findtext("msg") or "").replace("\n", " ").strip()
+        records.append(
+            {
+                "id": revision,
+                "short_id": f"r{revision}",
+                "date": date,
+                "message": message,
+            }
+        )
+    return records
+
+
+def format_change_record(record: dict) -> str:
+    message = record.get("message") or "无提交说明"
+    return f"{record.get('short_id', '')} {record.get('date', '')} {message}".strip()
+
+
+def choose_records(title: str, records: list[dict]) -> list[dict]:
+    labels = [format_change_record(record) for record in records]
+    selected_labels = set(choose_items(title, labels))
+    return [record for label, record in zip(labels, records) if label in selected_labels]
+
+
+def list_recent_git_commits(project: Path, limit: int) -> list[dict]:
+    code, output = run_command(
+        [
+            "git",
+            "log",
+            "--date=short",
+            f"--max-count={limit}",
+            "--pretty=format:%H%x1f%h%x1f%ad%x1f%s",
+        ],
+        project,
+    )
+    if code != 0:
+        return []
+    return parse_git_log_records(output)
+
+
+def list_recent_svn_revisions(project: Path, limit: int) -> list[dict]:
+    code, output = run_command(["svn", "log", "--xml", "-l", str(limit)], project)
+    if code != 0:
+        return []
+    return parse_svn_log_records(output)
+
+
+def collect_git_selected_commits(project: Path, commits: list[dict]) -> dict:
+    status_code, status = run_command(["git", "status", "--short", "--untracked-files=all"], project)
+    changed = set()
+    diff_parts = []
+    stat_parts = []
+    for commit in commits:
+        commit_id = commit["id"]
+        name_code, names = run_command(["git", "show", "--name-only", "--format=", commit_id], project)
+        if name_code == 0:
+            changed.update(line.strip() for line in names.splitlines() if line.strip())
+        stat_code, stat = run_command(["git", "show", "--stat", "--format=medium", commit_id], project)
+        if stat_code == 0 and stat:
+            stat_parts.append(stat)
+        diff_code, diff = run_command(["git", "show", "--patch", "--unified=3", "--format=medium", commit_id], project)
+        if diff_code == 0 and diff:
+            diff_parts.append(diff)
+
+    return {
+        "source": "git",
+        "range": "interactive-selected-commits",
+        "selected_commits": commits,
+        "status": status if status_code == 0 else "",
+        "stat": "\n\n".join(stat_parts),
+        "diff": "\n\n".join(diff_parts),
+        "changed_files": sorted(changed),
+    }
+
+
+def collect_svn_selected_revisions(project: Path, revisions: list[dict]) -> dict:
+    status_code, status = run_command(["svn", "status"], project)
+    changed = set()
+    diff_parts = []
+    for revision in revisions:
+        revision_id = revision["id"]
+        diff_code, diff = run_command(["svn", "diff", "-c", revision_id], project)
+        if diff_code == 0 and diff:
+            diff_parts.append(diff)
+        summarize_code, summarize = run_command(["svn", "diff", "--summarize", "-c", revision_id], project)
+        if summarize_code == 0:
+            for line in summarize.splitlines():
+                parts = line.split()
+                if parts:
+                    changed.add(parts[-1])
+
+    return {
+        "source": "svn",
+        "range": "interactive-selected-revisions",
+        "selected_commits": revisions,
+        "status": status if status_code == 0 else "",
+        "stat": "",
+        "diff": "\n\n".join(diff_parts),
+        "changed_files": sorted(changed),
+    }
+
+
+def empty_interactive_changes(source: str) -> dict:
+    return {
+        "source": source,
+        "range": "interactive-empty",
+        "selected_commits": [],
+        "status": "未选择提交记录。",
+        "stat": "",
+        "diff": "",
+        "changed_files": [],
+    }
+
+
+def collect_interactive_changes(project: Path, limit: int) -> dict:
+    if is_git_repo(project):
+        records = list_recent_git_commits(project, limit)
+        selected = choose_records("请选择本次迭代包含的 Git 提交记录", records)
+        if not selected:
+            return empty_interactive_changes("git")
+        return collect_git_selected_commits(project, selected)
+    if is_svn_repo(project):
+        records = list_recent_svn_revisions(project, limit)
+        selected = choose_records("请选择本次迭代包含的 SVN 版本记录", records)
+        if not selected:
+            return empty_interactive_changes("svn")
+        return collect_svn_selected_revisions(project, selected)
+    print("当前项目不是 Git 或 SVN 仓库，交互选择提交记录不可用，改用目录快照扫描。")
+    return collect_snapshot_changes(project, None)
 
 
 def collect_git_changes(project: Path, base_ref: str | None, target_ref: str | None) -> dict:
@@ -547,6 +858,16 @@ def make_report(data: dict) -> str:
     else:
         lines.append("- 未从版本系统发现变更文件。")
 
+    if changes.get("selected_commits") is not None:
+        lines.extend(["", "## 本次迭代提交记录", ""])
+        if changes["selected_commits"]:
+            for commit in changes["selected_commits"]:
+                lines.append(
+                    f"- `{commit.get('short_id', commit.get('id', ''))}` {commit.get('date', '')} {commit.get('message', '')}"
+                )
+        else:
+            lines.append("- 未选择提交记录。")
+
     lines.extend(["", "## 需求和任务线索", ""])
     if data["specs"]:
         for spec in data["specs"]:
@@ -621,6 +942,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--base-ref", help="Git 基准引用，例如 main、HEAD~3 或某个 tag")
     parser.add_argument("--target-ref", help="Git 目标引用，默认 HEAD")
     parser.add_argument("--svn-revision", help="SVN 版本范围，例如 100:120")
+    parser.add_argument("--interactive", action="store_true", help="交互式选择本次迭代包含的 Git 提交或 SVN 版本")
+    parser.add_argument("--commit-limit", type=int, default=30, help="交互模式展示的最近提交/版本数量")
     parser.add_argument("--spec", action="append", default=[], help="需求、设计或任务文档，可重复传入")
     parser.add_argument("--rules", help="自定义 JSON 风险规则文件")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
@@ -643,7 +966,10 @@ def main(argv: list[str]) -> int:
 
     rules_path = Path(args.rules).resolve() if args.rules else None
     patterns = DEFAULT_RISK_PATTERNS + load_custom_patterns(rules_path)
-    changes = collect_changes(project, baseline, args.base_ref, args.target_ref, args.svn_revision)
+    if args.interactive:
+        changes = collect_interactive_changes(project, args.commit_limit)
+    else:
+        changes = collect_changes(project, baseline, args.base_ref, args.target_ref, args.svn_revision)
     spec_files = discover_spec_files(project, args.spec)
     specs = extract_spec_summary(project, spec_files)
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)

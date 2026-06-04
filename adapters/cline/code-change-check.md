@@ -15,6 +15,14 @@
 python path/to/code-change-check/scripts/code_change_check.py --project . --output code-change-check-output
 ```
 
+如果用户没有明确给出版本范围，优先使用交互式提交选择：
+
+```bash
+python path/to/code-change-check/scripts/code_change_check.py --project . --interactive --output code-change-check-output
+```
+
+交互模式支持方向键移动、空格多选、回车提交、`q` 取消。
+
 如果用户提供需求、设计或任务文档，使用：
 
 ```bash
