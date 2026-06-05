@@ -7,6 +7,7 @@
 - `SKILL.md`
 - `references/workflow.md`
 - `references/risk-rules.md`
+- `references/business-contracts.md`
 - `references/adapters.md`
 
 需要提取证据时，运行：
@@ -37,6 +38,15 @@ path/to/code-change-check/run-code-change-check.cmd --project . --interactive --
 
 如果发现需求、设计或任务文档，交互模式会继续让用户把每个提交关联到对应需求/任务。用户明确不需要时追加 `--no-map-requirements`。
 
+交互模式还会让用户选择业务契约来源：
+
+- 使用指定契约文件。
+- 从迭代前旧代码自动提取。
+- 两者都用。
+- 本次不使用业务契约。
+
+旧代码候选契约必须让用户确认后再用于审计。用户明确不需要确认时追加 `--no-confirm-contracts`。
+
 如果用户提供需求、设计或任务文档，使用：
 
 ```bash
@@ -59,3 +69,4 @@ path/to/code-change-check/run-code-change-check.cmd --project . --svn-revision 1
 - 需要补充的测试或运行验证。
 - 需求、设计、任务和代码之间的缺口。
 - 需求-提交映射缺口。
+- 业务契约来源、候选契约和启用契约。

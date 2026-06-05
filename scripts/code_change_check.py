@@ -87,6 +87,17 @@ SPEC_GLOBS = [
     "todo*.md",
 ]
 
+CONTRACT_GLOBS = [
+    "contracts/**/*.md",
+    "contracts/**/*.json",
+    "contracts/**/*.yaml",
+    "contracts/**/*.yml",
+    "docs/**/*contract*.md",
+    "docs/**/*契约*.md",
+    "*contract*.md",
+    "*契约*.md",
+]
+
 
 @dataclasses.dataclass(frozen=True)
 class RiskPattern:
@@ -322,21 +333,22 @@ def read_terminal_key() -> str:
 
 def parse_number_selection(raw: str, item_count: int) -> set[int]:
     selected: set[int] = set()
-    for part in raw.replace("，", ",").split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            start_text, end_text = part.split("-", 1)
-            start = int(start_text)
-            end = int(end_text)
-            for value in range(min(start, end), max(start, end) + 1):
+    normalized = raw.replace("\ufeff", "").replace("，", ",")
+    for part in re.findall(r"\d+(?:-\d+)?", normalized):
+        try:
+            if "-" in part:
+                start_text, end_text = part.split("-", 1)
+                start = int(start_text)
+                end = int(end_text)
+                for value in range(min(start, end), max(start, end) + 1):
+                    if 1 <= value <= item_count:
+                        selected.add(value - 1)
+            else:
+                value = int(part)
                 if 1 <= value <= item_count:
                     selected.add(value - 1)
-        else:
-            value = int(part)
-            if 1 <= value <= item_count:
-                selected.add(value - 1)
+        except ValueError:
+            continue
     return selected
 
 
@@ -570,7 +582,7 @@ def collect_git_changes(project: Path, base_ref: str | None, target_ref: str | N
         changed.update(line.strip() for line in names.splitlines() if line.strip())
     if cached_code == 0:
         changed.update(line.strip() for line in cached_names.splitlines() if line.strip())
-    if status_code == 0:
+    if status_code == 0 and not base_ref:
         for line in status.splitlines():
             if len(line) > 3:
                 changed.add(line[3:].strip().strip('"'))
@@ -594,7 +606,7 @@ def collect_svn_changes(project: Path, svn_revision: str | None) -> dict:
         diff_code, diff = run_command(["svn", "diff"], project)
         summarize_code, summarize = 1, ""
     changed = []
-    if status_code == 0:
+    if status_code == 0 and not svn_revision:
         for line in status.splitlines():
             if len(line) > 8:
                 changed.append(line[8:].strip())
@@ -786,6 +798,263 @@ def create_requirement_commit_mappings(
     return mappings
 
 
+def resolve_contract_source_selection(selected_labels: list[str]) -> str:
+    has_file = any("指定契约文件" in label for label in selected_labels)
+    has_existing = any("旧代码" in label or "已有代码" in label for label in selected_labels)
+    has_none = any("不使用" in label for label in selected_labels)
+    if has_none:
+        return "none"
+    if has_file and has_existing:
+        return "both"
+    if has_file:
+        return "file"
+    if has_existing:
+        return "existing-code"
+    return "none"
+
+
+def choose_contract_source() -> str:
+    labels = [
+        "使用指定契约文件",
+        "从旧代码自动提取",
+        "本次先不使用业务契约",
+    ]
+    selected = choose_items("请选择业务契约来源", labels)
+    return resolve_contract_source_selection(selected)
+
+
+def discover_contract_files(project: Path, explicit_contracts: list[str]) -> list[Path]:
+    result: list[Path] = []
+    for contract in explicit_contracts:
+        path = Path(contract)
+        if not path.is_absolute():
+            path = project / path
+        if path.exists() and path.is_file():
+            result.append(path)
+
+    seen = {p.resolve() for p in result}
+    for pattern in CONTRACT_GLOBS:
+        for path in project.glob(pattern):
+            if path.is_file() and path.resolve() not in seen and not should_skip(path.relative_to(project)):
+                seen.add(path.resolve())
+                result.append(path)
+    return result
+
+
+def renumber_contracts(contracts: list[dict]) -> list[dict]:
+    result = []
+    for index, contract in enumerate(contracts, start=1):
+        item = dict(contract)
+        item["id"] = f"C{index}"
+        result.append(item)
+    return result
+
+
+def extract_contracts_from_text(file: str, text: str, source: str = "contract-file") -> list[dict]:
+    contract_re = re.compile(
+        r"(必须|不能|不得|禁止|只允许|应当|需要|参数|字段|格式|顺序|兼容|internalBaseUrl|publicBaseUrl|tenantId|签名|幂等|状态|枚举)"
+    )
+    contracts = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if contract_re.search(stripped):
+            contracts.append(
+                {
+                    "id": f"C{len(contracts) + 1}",
+                    "source": source,
+                    "file": file,
+                    "line": line_number,
+                    "kind": "text-rule",
+                    "text": stripped[:300],
+                }
+            )
+    return contracts
+
+
+def extract_contracts_from_files(project: Path, contract_files: list[Path]) -> list[dict]:
+    contracts = []
+    for path in contract_files:
+        contracts.extend(
+            extract_contracts_from_text(
+                normalize_relative(path, project),
+                read_text(path),
+                source="contract-file",
+            )
+        )
+    return renumber_contracts(contracts)
+
+
+def extract_contracts_from_code_text(file: str, text: str, source: str) -> list[dict]:
+    call_re = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Client|Service|Helper|Adapter)\.[A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)")
+    contracts = []
+    seen = set()
+
+    def add_contract(line_number: int, kind: str, contract_text: str) -> None:
+        key = (kind, contract_text)
+        if key in seen:
+            return
+        seen.add(key)
+        contracts.append(
+            {
+                "id": f"C{len(contracts) + 1}",
+                "source": source,
+                "file": file,
+                "line": line_number,
+                "kind": kind,
+                "text": contract_text,
+            }
+        )
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if "internalBaseUrl" in stripped:
+            add_contract(line_number, "addressing", f"已有代码使用 internalBaseUrl 作为内部寻址线索：{stripped[:180]}")
+        if "publicBaseUrl" in stripped:
+            add_contract(line_number, "addressing", f"已有代码使用 publicBaseUrl 作为外部寻址线索：{stripped[:180]}")
+        if "tenantId" in stripped or "tenant_id" in stripped:
+            add_contract(line_number, "tenant", f"已有代码包含租户隔离字段线索：{stripped[:180]}")
+        if re.search(r"\b(status|state)\b", stripped, re.IGNORECASE):
+            add_contract(line_number, "state", f"已有代码包含状态字段线索：{stripped[:180]}")
+        call_match = call_re.search(stripped)
+        if call_match:
+            call_name = call_match.group(1)
+            args = [part.strip() for part in call_match.group(2).split(",") if part.strip()]
+            add_contract(
+                line_number,
+                "call-shape",
+                f"已有调用约定 {call_name} 参数数量 {len(args)}，参数：{', '.join(args)[:160]}",
+            )
+    return contracts
+
+
+def extract_contracts_from_existing_code(project: Path, candidate_files: list[str] | None = None) -> list[dict]:
+    if candidate_files:
+        files = []
+        for rel_path in candidate_files:
+            path = project / rel_path
+            if path.exists() and path.is_file() and is_text_file(path) and not should_skip(path.relative_to(project)):
+                files.append(path)
+    else:
+        files = list(iter_project_files(project))
+
+    contracts = []
+    for path in files:
+        try:
+            text = read_text(path)
+        except OSError:
+            continue
+        contracts.extend(
+            extract_contracts_from_code_text(
+                normalize_relative(path, project),
+                text,
+                source="existing-code-current",
+            )
+        )
+    return renumber_contracts(contracts)
+
+
+def resolve_previous_revision(project: Path, changes: dict) -> tuple[str, str] | None:
+    source = changes.get("source")
+    selected = changes.get("selected_commits") or []
+    if source == "git":
+        if selected:
+            oldest_commit = selected[-1]["id"]
+            code, output = run_command(["git", "rev-parse", f"{oldest_commit}^"], project)
+            if code == 0 and output:
+                return "git", output.splitlines()[-1].strip()
+        range_ref = changes.get("range", "")
+        if ".." in range_ref:
+            return "git", range_ref.split("..", 1)[0]
+        return "git", "HEAD"
+    if source == "svn":
+        if selected:
+            revisions = [int(item["id"]) for item in selected if str(item.get("id", "")).isdigit()]
+            if revisions:
+                return "svn", str(max(min(revisions) - 1, 0))
+        range_ref = changes.get("range", "")
+        if ":" in range_ref:
+            start = range_ref.split(":", 1)[0]
+            if start.isdigit():
+                return "svn", str(max(int(start) - 1, 0))
+    if source == "snapshot":
+        range_ref = changes.get("range", "")
+        if ".." in range_ref:
+            baseline = range_ref.split("..", 1)[0]
+            if baseline:
+                return "snapshot", baseline
+    return None
+
+
+def extract_contracts_from_previous_code(project: Path, changes: dict) -> list[dict]:
+    previous = resolve_previous_revision(project, changes)
+    if previous is None:
+        return []
+    source, revision = previous
+    contracts = []
+    for rel_path in changes.get("changed_files", []):
+        if not is_text_file(Path(rel_path)):
+            continue
+        if source == "git":
+            code, text = run_command(["git", "show", f"{revision}:{rel_path}"], project)
+        elif source == "svn":
+            code, text = run_command(["svn", "cat", "-r", revision, rel_path], project)
+        else:
+            baseline_path = Path(revision) / rel_path
+            if not baseline_path.exists() or not baseline_path.is_file():
+                continue
+            code, text = 0, read_text(baseline_path)
+        if code != 0 or not text:
+            continue
+        contracts.extend(
+            extract_contracts_from_code_text(
+                rel_path,
+                text,
+                source=f"existing-code-baseline:{revision}",
+            )
+        )
+    return renumber_contracts(contracts)
+
+
+def collect_business_contracts(
+    project: Path,
+    source: str,
+    explicit_contracts: list[str],
+    changes: dict,
+) -> tuple[str, list[dict]]:
+    if source == "interactive":
+        source = choose_contract_source()
+    if source == "none":
+        return source, []
+
+    contracts = []
+    if source in {"file", "both"}:
+        contract_files = discover_contract_files(project, explicit_contracts)
+        contracts.extend(extract_contracts_from_files(project, contract_files))
+    if source in {"existing-code", "both"}:
+        if resolve_previous_revision(project, changes) is not None:
+            contracts.extend(extract_contracts_from_previous_code(project, changes))
+        else:
+            contracts.extend(extract_contracts_from_existing_code(project, changes.get("changed_files") or None))
+    return source, renumber_contracts(contracts)
+
+
+def confirm_business_contracts(contracts: list[dict], choose_contracts=None) -> list[dict]:
+    if not contracts:
+        return []
+    labels = [
+        f"{contract['id']} {contract['source']} {contract['kind']} {contract['file']}:L{contract['line']} {contract['text'][:120]}"
+        for contract in contracts
+    ]
+    if choose_contracts is None:
+        selected_labels = choose_items("请选择本次审计启用的业务契约", labels)
+    else:
+        selected_labels = choose_contracts(labels)
+    selected_set = set(selected_labels)
+    return [contract for label, contract in zip(labels, contracts) if label in selected_set]
+
+
 def load_custom_patterns(rules_path: Path | None) -> list[RiskPattern]:
     if rules_path is None:
         return []
@@ -887,6 +1156,8 @@ def make_report(data: dict) -> str:
         f"- 变更范围：`{changes.get('range', '')}`",
         f"- 变更文件数：{len(changes['changed_files'])}",
         f"- 需求/任务文档数：{len(data['specs'])}",
+        f"- 候选业务契约数：{len(data.get('contract_candidates', []))}",
+        f"- 启用业务契约数：{len(data.get('business_contracts', []))}",
         f"- 风险命中数：{len(findings)}",
         "",
         "## 总览",
@@ -962,6 +1233,21 @@ def make_report(data: dict) -> str:
                 lines.append(f"- 其余 {len(unmapped_requirements) - 50} 条略。")
     else:
         lines.append("- 未生成需求-提交映射。交互选择提交后可启用映射。")
+
+    lines.extend(["", "## 业务契约", ""])
+    lines.append(f"- 契约来源：`{data.get('contract_source', 'none')}`")
+    lines.append(f"- 候选契约数：{len(data.get('contract_candidates', []))}")
+    lines.append(f"- 启用契约数：{len(data.get('business_contracts', []))}")
+    business_contracts = data.get("business_contracts", [])
+    if business_contracts:
+        for contract in business_contracts[:120]:
+            lines.append(
+                f"- `{contract['id']}` `{contract['source']}` {contract['kind']} `{contract['file']}:L{contract['line']}` {contract['text']}"
+            )
+        if len(business_contracts) > 120:
+            lines.append(f"- 其余 {len(business_contracts) - 120} 条略。")
+    else:
+        lines.append("- 未启用或未提取到业务契约。")
 
     lines.extend(["", "## 需求和任务线索", ""])
     if data["specs"]:
@@ -1042,6 +1328,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--map-requirements", action="store_true", help="为选中的提交交互式关联需求/任务")
     parser.add_argument("--no-map-requirements", action="store_true", help="交互模式下跳过需求-提交映射")
     parser.add_argument("--spec", action="append", default=[], help="需求、设计或任务文档，可重复传入")
+    parser.add_argument("--contract", action="append", default=[], help="业务契约文件，可重复传入")
+    parser.add_argument(
+        "--contract-source",
+        choices=["interactive", "file", "existing-code", "both", "none"],
+        default=None,
+        help="业务契约来源：交互选择、指定文件、已有代码、两者都用或不使用",
+    )
+    parser.add_argument("--no-contract", action="store_true", help="跳过业务契约提取")
+    parser.add_argument("--confirm-contracts", action="store_true", help="交互确认本次审计启用的候选契约")
+    parser.add_argument("--no-confirm-contracts", action="store_true", help="跳过候选契约确认并启用全部候选契约")
     parser.add_argument("--rules", help="自定义 JSON 风险规则文件")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
@@ -1081,6 +1377,25 @@ def main(argv: list[str]) -> int:
         if should_map_requirements
         else []
     )
+    contract_source = "none"
+    if not args.no_contract:
+        contract_source = args.contract_source or ("interactive" if args.interactive else ("file" if args.contract else "none"))
+    contract_source, contract_candidates = collect_business_contracts(
+        project,
+        contract_source,
+        args.contract,
+        changes,
+    )
+    should_confirm_contracts = (
+        bool(contract_candidates)
+        and not args.no_confirm_contracts
+        and (args.interactive or args.confirm_contracts)
+    )
+    business_contracts = (
+        confirm_business_contracts(contract_candidates)
+        if should_confirm_contracts
+        else contract_candidates
+    )
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
 
     data = {
@@ -1090,6 +1405,9 @@ def main(argv: list[str]) -> int:
         "specs": specs,
         "requirement_items": requirement_items,
         "requirement_commit_mappings": requirement_commit_mappings,
+        "contract_source": contract_source,
+        "contract_candidates": contract_candidates,
+        "business_contracts": business_contracts,
         "findings": [dataclasses.asdict(finding) for finding in findings],
         "summary": summarize_findings(findings),
         "mermaid": build_mermaid(findings),

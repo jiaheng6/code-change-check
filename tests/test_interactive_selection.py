@@ -70,6 +70,11 @@ class InteractiveSelectionTest(unittest.TestCase):
         self.tool.apply_multiselect_key(state, "down", 3)
         self.assertEqual(state.cursor, 0)
 
+    def test_parse_number_selection_ignores_invalid_encoded_input(self):
+        selected = self.tool.parse_number_selection("锘?1,无效,3", 3)
+
+        self.assertEqual(selected, {0, 2})
+
     def test_parse_git_log_records(self):
         raw = "abcdef123456\x1fabcdef1\x1f2026-06-04\x1f修复内部寻址\n"
 
