@@ -379,6 +379,7 @@ def run_codeql_analysis(
     build_mode: str | None = None,
     build_command: str | None = None,
     cache_root: Path | None = None,
+    source_scope: str = "current-working-tree",
     command_runner: CommandRunner = run_command,
 ) -> dict:
     environment = detect_codeql(project, executable, command_runner)
@@ -389,7 +390,7 @@ def run_codeql_analysis(
         "message": environment["message"],
         "detail": environment.get("detail", ""),
         "version": environment.get("version", ""),
-        "source_scope": "current-working-tree",
+        "source_scope": source_scope,
         "detected_languages": [],
         "languages": [],
         "databases": [],

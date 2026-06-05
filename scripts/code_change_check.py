@@ -20,7 +20,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from codeql_support import run_codeql_analysis
+from codeql_comparison import run_codeql_review
 
 
 TEXT_EXTENSIONS = {
@@ -1081,7 +1081,7 @@ def choose_codeql_enabled() -> bool:
 def resolve_codeql_enabled(args: argparse.Namespace, choose_enabled=None) -> bool:
     if args.no_codeql:
         return False
-    if args.codeql or args.require_codeql:
+    if args.codeql or args.require_codeql or args.require_codeql_compare:
         return True
     if args.interactive:
         chooser = choose_enabled or choose_codeql_enabled
@@ -1103,6 +1103,17 @@ def disabled_codeql_result() -> dict:
         "databases": [],
         "sarif_files": [],
         "findings": [],
+        "comparison": {
+            "status": "disabled",
+            "message": "本次检查未启用 CodeQL baseline/target 对比。",
+            "baseline": None,
+            "target": None,
+            "baseline_status": "",
+            "target_status": "",
+            "new_findings": [],
+            "existing_findings": [],
+            "resolved_findings": [],
+        },
     }
 
 
@@ -1326,6 +1337,34 @@ def make_report(data: dict) -> str:
     if codeql.get("detail"):
         lines.append(f"- 详情：{codeql['detail'][:500]}")
 
+    comparison = codeql.get("comparison", {})
+    lines.extend(["", "## CodeQL baseline/target 对比", ""])
+    lines.append(f"- 状态：`{comparison.get('status', 'disabled')}`")
+    lines.append(f"- 说明：{comparison.get('message', '')}")
+    if comparison.get("baseline"):
+        lines.append(
+            f"- baseline：`{comparison['baseline'].get('kind', '')}:{comparison['baseline'].get('value', '')}`"
+        )
+    if comparison.get("target"):
+        lines.append(
+            f"- target：`{comparison['target'].get('kind', '')}:{comparison['target'].get('value', '')}`"
+        )
+    if comparison.get("baseline_status"):
+        lines.append(f"- baseline 分析状态：`{comparison['baseline_status']}`")
+    if comparison.get("target_status"):
+        lines.append(f"- target 分析状态：`{comparison['target_status']}`")
+    lines.append(f"- 新增 CodeQL 命中：{len(comparison.get('new_findings', []))}")
+    lines.append(f"- 已有 CodeQL 命中：{len(comparison.get('existing_findings', []))}")
+    lines.append(f"- 已消失 CodeQL 命中：{len(comparison.get('resolved_findings', []))}")
+    if comparison.get("new_findings"):
+        lines.append("")
+        lines.append("新增命中：")
+        for finding in comparison["new_findings"][:50]:
+            lines.append(
+                f"- `{finding.get('severity', '')}` `{finding.get('file', '')}:{finding.get('line', 1)}` "
+                f"{finding.get('title', '')}：{finding.get('message', '')}"
+            )
+
     lines.extend(["", "## 需求和任务线索", ""])
     if data["specs"]:
         for spec in data["specs"]:
@@ -1420,6 +1459,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     codeql_group.add_argument("--codeql", action="store_true", help="启用 CodeQL 深度分析")
     codeql_group.add_argument("--no-codeql", action="store_true", help="禁用 CodeQL 深度分析")
     parser.add_argument("--require-codeql", action="store_true", help="要求 CodeQL 分析成功，否则返回失败状态")
+    parser.add_argument("--no-codeql-compare", action="store_true", help="禁用 CodeQL baseline/target 对比")
+    parser.add_argument(
+        "--require-codeql-compare",
+        action="store_true",
+        help="要求 CodeQL baseline/target 对比成功，否则返回失败状态",
+    )
     parser.add_argument("--codeql-executable", default="codeql", help="CodeQL CLI 可执行命令或路径")
     parser.add_argument("--codeql-language", action="append", default=[], help="指定 CodeQL 分析语言，可重复传入")
     parser.add_argument(
@@ -1462,9 +1507,12 @@ def main(argv: list[str]) -> int:
             if not cache_root.is_absolute():
                 cache_root = project / cache_root
             cache_root = cache_root.resolve()
-        codeql = run_codeql_analysis(
+        codeql = run_codeql_review(
             project,
             output,
+            changes,
+            baseline_path=baseline,
+            compare=not args.no_codeql_compare,
             languages=args.codeql_language or None,
             executable=args.codeql_executable,
             build_mode=args.codeql_build_mode,
@@ -1540,6 +1588,9 @@ def main(argv: list[str]) -> int:
     if args.require_codeql and codeql["status"] != "success":
         print("CodeQL 是本次检查的必需项，但未成功完成。", file=sys.stderr)
         return 3
+    if args.require_codeql_compare and codeql.get("comparison", {}).get("status") != "success":
+        print("CodeQL baseline/target 对比是本次检查的必需项，但未成功完成。", file=sys.stderr)
+        return 4
     return 0
 
 

@@ -11,7 +11,7 @@ description: 用于检查 AI 或人工完成的代码变更质量，选择迭代
 
 1. 明确检查范围：确认项目根目录、需求/设计/任务文档位置、版本来源和用户特别关注的风险。
 2. 收集变更证据：优先识别 Git，其次 SVN；没有版本管理时使用目录快照或全量扫描。
-3. 确认是否启用 CodeQL。启用后检测 CLI、语言和缓存，并对当前工作目录创建或复用 target database。
+3. 确认是否启用 CodeQL。启用后检测 CLI、语言和缓存，构造可靠的 baseline/target 源代码，分别创建或复用 database。
 4. 收集需求证据：读取 OpenSpec、spec-kit、superpowers、Markdown 需求、任务列表和用户补充说明。
 5. 确认业务契约来源：使用指定契约文件、从迭代前旧代码提取、两者都用或不使用。
 6. 让用户确认从旧代码和契约文件中提取出的候选契约，避免把历史坏代码直接当标准。
@@ -69,7 +69,7 @@ path/to/code-change-check/run-code-change-check.cmd --project . --codeql --outpu
 path/to/code-change-check/run-code-change-check.cmd --project . --require-codeql --output code-change-check-output
 ```
 
-CodeQL database 默认缓存到目标项目的 `.code-change-check/cache/codeql/`。当前阶段分析项目当前工作目录，尚未为用户选择的历史提交构造独立 target worktree。详细规则见 `references/codeql.md`。
+CodeQL database 默认缓存到目标项目的 `.code-change-check/cache/codeql/`。默认尝试 baseline/target 对比；需要关闭时使用 `--no-codeql-compare`，要求对比必须成功时使用 `--require-codeql-compare`。详细规则见 `references/codeql.md`。
 
 指定业务契约文件：
 

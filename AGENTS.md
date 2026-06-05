@@ -23,3 +23,4 @@
 - 启动器测试：`python tests/test_launchers.py`
 - CodeQL 支撑测试：`python tests/test_codeql_support.py`
 - CodeQL 集成测试：`python tests/test_codeql_integration.py`
+- CodeQL 对比测试：`python tests/test_codeql_comparison.py`

@@ -18,7 +18,11 @@ def load_tool_module():
     return module
 
 
-def codeql_result(status: str, findings: list[dict] | None = None) -> dict:
+def codeql_result(
+    status: str,
+    findings: list[dict] | None = None,
+    comparison_status: str = "unsupported",
+) -> dict:
     return {
         "enabled": True,
         "available": status != "unavailable",
@@ -31,6 +35,15 @@ def codeql_result(status: str, findings: list[dict] | None = None) -> dict:
         "databases": [],
         "sarif_files": [],
         "findings": findings or [],
+        "comparison": {
+            "status": comparison_status,
+            "message": "测试对比状态",
+            "baseline": None,
+            "target": {"kind": "current", "value": "current-working-tree"},
+            "new_findings": findings or [],
+            "existing_findings": [],
+            "resolved_findings": [],
+        },
     }
 
 
@@ -51,6 +64,11 @@ class CodeQLIntegrationTest(unittest.TestCase):
         enabled = self.tool.resolve_codeql_enabled(args, choose_enabled=lambda: True)
 
         self.assertTrue(enabled)
+
+    def test_require_codeql_compare_enables_codeql(self):
+        args = self.tool.parse_args(["--require-codeql-compare"])
+
+        self.assertTrue(self.tool.resolve_codeql_enabled(args))
 
     def test_main_scanner_skips_codeql_cache_directory(self):
         self.assertTrue(self.tool.should_skip(Path(".code-change-check/cache/codeql/database/file.py")))
@@ -73,7 +91,7 @@ class CodeQLIntegrationTest(unittest.TestCase):
             "snippet": "db.query(input)",
             "message": "发现不可信 SQL 输入",
         }
-        self.tool.run_codeql_analysis = lambda *args, **kwargs: codeql_result("success", [finding])
+        self.tool.run_codeql_review = lambda *args, **kwargs: codeql_result("success", [finding], "success")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir) / "project"
@@ -91,9 +109,10 @@ class CodeQLIntegrationTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(evidence["codeql"]["status"], "success")
         self.assertTrue(any(item["id"] == "codeql:js/sql-injection" for item in evidence["findings"]))
+        self.assertEqual(evidence["codeql"]["comparison"]["status"], "success")
 
     def test_require_codeql_returns_failure_after_writing_report(self):
-        self.tool.run_codeql_analysis = lambda *args, **kwargs: codeql_result("unavailable")
+        self.tool.run_codeql_review = lambda *args, **kwargs: codeql_result("unavailable")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir) / "project"
@@ -109,6 +128,30 @@ class CodeQLIntegrationTest(unittest.TestCase):
         self.assertEqual(exit_code, 3)
         self.assertIn("## CodeQL 深度分析", report)
         self.assertIn("unavailable", report)
+
+    def test_require_codeql_compare_returns_failure_when_comparison_is_unsupported(self):
+        self.tool.run_codeql_review = lambda *args, **kwargs: codeql_result("success", comparison_status="unsupported")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir) / "project"
+            output = Path(temp_dir) / "output"
+            project.mkdir()
+            (project / "app.py").write_text("print('ok')\n", encoding="utf-8")
+
+            exit_code = self.tool.main(
+                [
+                    "--project",
+                    str(project),
+                    "--require-codeql-compare",
+                    "--no-contract",
+                    "--output",
+                    str(output),
+                ]
+            )
+            report = (output / "code-change-check-report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 4)
+        self.assertIn("## CodeQL baseline/target 对比", report)
 
 
 if __name__ == "__main__":

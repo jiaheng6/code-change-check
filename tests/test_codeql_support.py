@@ -42,6 +42,16 @@ class CodeQLSupportTest(unittest.TestCase):
         self.assertEqual(status["status"], "unavailable")
         self.assertIn("未检测到 CodeQL CLI", status["message"])
 
+    def test_run_codeql_analysis_keeps_explicit_source_scope_when_unavailable(self):
+        result = self.codeql.run_codeql_analysis(
+            Path("."),
+            Path("output"),
+            source_scope="git:main",
+            command_runner=lambda args, cwd: (127, "命令不存在：codeql"),
+        )
+
+        self.assertEqual(result["source_scope"], "git:main")
+
     def test_normalize_languages_accepts_codeql_extractor_aliases(self):
         languages = self.codeql.normalize_languages(["javascript", "java", "cpp", "python"])
 
