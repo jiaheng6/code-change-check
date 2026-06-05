@@ -14,6 +14,7 @@
 - `contract_source`：业务契约来源。
 - `contract_candidates`：从契约文件或旧代码提取出的候选契约。
 - `business_contracts`：用户确认后本次审计启用的业务契约。
+- `business_contract_check`：业务契约执行状态、检查契约数和契约违反项。
 - `codeql`：target CodeQL 启用状态、CLI 状态、分析范围、语言、数据库、SARIF 文件和原始 CodeQL 命中。
 - `codeql.comparison`：baseline/target 来源、两端状态、新增命中、已有命中、已消失命中和 baseline 分析证据。
 - `codeql.comparison.semantic`：baseline/target 语义清单、语义对比状态，以及调用参数、寻址、租户字段和状态字段变化。
@@ -29,7 +30,7 @@
 - 变更文件。
 - 本次迭代提交记录。
 - 需求-提交映射。
-- 业务契约来源、候选契约数和启用契约。
+- 业务契约来源、候选契约数、启用契约和业务契约执行结果。
 - CodeQL 状态、分析范围、语言、数据库缓存状态、两端对比状态、差异命中数和业务语义差异。
 - 需求和任务线索。
 - Mermaid 风险图。

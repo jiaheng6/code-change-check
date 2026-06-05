@@ -27,9 +27,22 @@
 - 状态字段：`status`、`state`。
 - 显式文本规则：必须、禁止、字段、格式、参数、顺序、兼容、签名、幂等等。
 
+## 执行检查
+
+已启用的 `business_contracts` 会和 target 语义清单对比，结果写入 `business_contract_check`，并将违反项转成 `业务契约` 风险命中。
+
+首批可执行类型：
+
+- `addressing`：旧代码或显式规则要求 `internalBaseUrl` 时，target 不能改成 `publicBaseUrl`。
+- `call-shape`：旧代码的 `Client`、`Service`、`Helper`、`Adapter` 调用需要保留参数数量和已知参数线索，支持跨行调用。
+- `tenant`：旧代码或显式规则中的租户字段线索需要在 target 中保留。
+- `state`：旧代码或显式规则中的状态字段线索需要在 target 中保留。
+- `text-rule`：目前只执行能解析为寻址、调用形态、租户字段或状态字段的文本规则，其余文本规则仍作为人工复核线索。
+
 ## 使用原则
 
 - 自动提取结果只是候选契约，不是最终标准。
 - 交互模式下必须让用户确认本次启用的候选契约。
 - 没有选择的候选契约保留在 JSON 证据包中，但不作为本次审计标准。
-- 后续 CodeQL、AST、规则引擎应消费 `business_contracts`，而不是直接消费全部候选契约。
+- 规则引擎只消费 `business_contracts`，不直接消费全部候选契约。
+- 契约执行结果是风险线索，不替代人工确认和回归测试。

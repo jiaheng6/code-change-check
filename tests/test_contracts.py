@@ -64,6 +64,31 @@ class ContractTest(unittest.TestCase):
         self.assertIn("PaymentClient.createOrder", contract_text)
         self.assertIn("tenantId", contract_text)
 
+    def test_extract_contracts_from_existing_code_detects_multiline_call_shape(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            source = project / "src" / "order.ts"
+            source.parent.mkdir()
+            source.write_text(
+                "\n".join(
+                    [
+                        "await OrderClient.create(",
+                        "  orderId,",
+                        "  tenantId,",
+                        "  payload,",
+                        ");",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            contracts = self.tool.extract_contracts_from_existing_code(project, ["src/order.ts"])
+
+        call_contract = next(item for item in contracts if item["kind"] == "call-shape")
+        self.assertIn("OrderClient.create", call_contract["text"])
+        self.assertIn("参数数量 3", call_contract["text"])
+        self.assertIn("tenantId", call_contract["text"])
+
     def test_choose_contract_source_maps_labels_to_source(self):
         selected = self.tool.resolve_contract_source_selection(
             ["从旧代码自动提取", "使用指定契约文件"]

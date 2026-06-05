@@ -20,6 +20,7 @@
 - 自检：`python scripts/code_change_check.py --project . --output code-change-check-output --scan-all`
 - 单元测试：`python tests/test_interactive_selection.py`
 - 契约测试：`python tests/test_contracts.py`
+- 契约执行测试：`python tests/test_contract_rules.py`
 - 启动器测试：`python tests/test_launchers.py`
 - CodeQL 支撑测试：`python tests/test_codeql_support.py`
 - CodeQL 集成测试：`python tests/test_codeql_integration.py`

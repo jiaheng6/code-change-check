@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import defaultdict
 from pathlib import Path
 import re
@@ -139,13 +140,54 @@ def extract_line_calls(file: str, line_number: int, line: str) -> list[dict]:
     return items
 
 
-def extract_file_inventory(path: Path, project: Path) -> list[dict]:
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    file = path.relative_to(project).as_posix()
+def line_starts(text: str) -> list[int]:
+    starts = [0]
+    for index, char in enumerate(text):
+        if char == "\n":
+            starts.append(index + 1)
+    return starts
+
+
+def line_number_for_offset(starts: list[int], offset: int) -> int:
+    return bisect_right(starts, offset)
+
+
+def extract_text_calls(file: str, text: str) -> list[dict]:
+    items = []
+    starts = line_starts(text)
+    for match in CALL_START_RE.finditer(text):
+        open_index = text.find("(", match.end() - 1)
+        if open_index < 0:
+            continue
+        close_index = find_closing_parenthesis(text, open_index)
+        if close_index is None:
+            continue
+        arguments = split_arguments(text[open_index + 1 : close_index])
+        line_number = line_number_for_offset(starts, match.start())
+        snippet_start = starts[line_number - 1]
+        snippet_end = text.find("\n", close_index)
+        if snippet_end < 0:
+            snippet_end = len(text)
+        items.append(
+            {
+                "kind": "call",
+                "file": file,
+                "line": line_number,
+                "symbol": match.group(1),
+                "argument_count": len(arguments),
+                "arguments": arguments,
+                "text": normalize_space(text[snippet_start:snippet_end])[:300],
+            }
+        )
+    return items
+
+
+def extract_text_inventory(file: str, text: str) -> list[dict]:
+    lines = text.splitlines()
     items = []
     seen_fields = set()
+    items.extend(extract_text_calls(file, text))
     for line_number, line in enumerate(lines, start=1):
-        items.extend(extract_line_calls(file, line_number, line))
         for token, value in (
             ("internalBaseUrl", "internal"),
             ("INTERNAL_BASE_URL", "internal"),
@@ -184,6 +226,12 @@ def extract_file_inventory(path: Path, project: Path) -> list[dict]:
                     }
                 )
     return items
+
+
+def extract_file_inventory(path: Path, project: Path) -> list[dict]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    file = path.relative_to(project).as_posix()
+    return extract_text_inventory(file, text)
 
 
 def extract_semantic_inventory(project: Path, engine: str = "lightweight") -> dict:

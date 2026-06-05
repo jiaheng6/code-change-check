@@ -64,6 +64,33 @@ class SemanticInventoryTest(unittest.TestCase):
         self.assertTrue(any(item["symbol"] == "tenantId" for item in fields))
         self.assertTrue(any(item["symbol"] == "status" for item in fields))
 
+    def test_extract_semantic_inventory_finds_multiline_call_arguments(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            source = project / "src" / "order.ts"
+            source.parent.mkdir()
+            source.write_text(
+                "\n".join(
+                    [
+                        "await OrderClient.create(",
+                        "  orderId,",
+                        "  tenantId,",
+                        "  buildPayload(amount),",
+                        ");",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            inventory = self.semantic.extract_semantic_inventory(project)
+
+        calls = [item for item in inventory["items"] if item["kind"] == "call"]
+        self.assertTrue(any(item["symbol"] == "OrderClient.create" for item in calls))
+        order_call = next(item for item in calls if item["symbol"] == "OrderClient.create")
+        self.assertEqual(order_call["line"], 1)
+        self.assertEqual(order_call["argument_count"], 3)
+        self.assertEqual(order_call["arguments"], ["orderId", "tenantId", "buildPayload(amount)"])
+
     def test_extract_semantic_inventory_reports_unreadable_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir)

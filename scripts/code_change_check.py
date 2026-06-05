@@ -20,7 +20,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+from contract_rules import evaluate_contracts
 from codeql_comparison import run_codeql_review
+from semantic_inventory import extract_semantic_inventory, extract_text_inventory
 
 
 TEXT_EXTENSIONS = {
@@ -905,7 +907,6 @@ def extract_contracts_from_files(project: Path, contract_files: list[Path]) -> l
 
 
 def extract_contracts_from_code_text(file: str, text: str, source: str) -> list[dict]:
-    call_re = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Client|Service|Helper|Adapter)\.[A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)")
     contracts = []
     seen = set()
 
@@ -935,14 +936,15 @@ def extract_contracts_from_code_text(file: str, text: str, source: str) -> list[
             add_contract(line_number, "tenant", f"已有代码包含租户隔离字段线索：{stripped[:180]}")
         if re.search(r"\b(status|state)\b", stripped, re.IGNORECASE):
             add_contract(line_number, "state", f"已有代码包含状态字段线索：{stripped[:180]}")
-        call_match = call_re.search(stripped)
-        if call_match:
-            call_name = call_match.group(1)
-            args = [part.strip() for part in call_match.group(2).split(",") if part.strip()]
+    for item in extract_text_inventory(file, text):
+        if item.get("kind") != "call":
+            continue
+        call_name = item.get("symbol", "")
+        if re.search(r"[A-Z][A-Za-z0-9_]*(?:Client|Service|Helper|Adapter)\.[A-Za-z_][A-Za-z0-9_]*$", call_name):
             add_contract(
-                line_number,
+                int(item.get("line", 1)),
                 "call-shape",
-                f"已有调用约定 {call_name} 参数数量 {len(args)}，参数：{', '.join(args)[:160]}",
+                f"已有调用约定 {call_name} 参数数量 {item.get('argument_count', 0)}，参数：{', '.join(item.get('arguments', []))[:160]}",
             )
     return contracts
 
@@ -1140,6 +1142,30 @@ def semantic_changes_to_findings(changes: list[dict]) -> list[Finding]:
     ]
 
 
+def contract_violations_to_findings(violations: list[dict]) -> list[Finding]:
+    return [
+        Finding(
+            id=violation.get("id", "contract:unknown"),
+            title=f"业务契约违反：{violation.get('type', 'unknown')}",
+            severity=violation.get("severity", "high"),
+            category="业务契约",
+            file=violation.get("file", ""),
+            line=int(violation.get("line", 1)),
+            snippet=violation.get("actual", "")[:240],
+            message=violation.get("message", "发现业务契约违反。"),
+        )
+        for violation in violations
+    ]
+
+
+def codeql_target_inventory(codeql: dict) -> dict | None:
+    return (
+        codeql.get("comparison", {})
+        .get("semantic", {})
+        .get("target_inventory")
+    )
+
+
 def load_custom_patterns(rules_path: Path | None) -> list[RiskPattern]:
     if rules_path is None:
         return []
@@ -1333,6 +1359,24 @@ def make_report(data: dict) -> str:
             lines.append(f"- 其余 {len(business_contracts) - 120} 条略。")
     else:
         lines.append("- 未启用或未提取到业务契约。")
+
+    contract_check = data.get("business_contract_check", {})
+    violations = contract_check.get("violations", [])
+    lines.extend(["", "## 业务契约执行结果", ""])
+    lines.append(f"- 状态：`{contract_check.get('status', 'disabled')}`")
+    lines.append(f"- 说明：{contract_check.get('message', '')}")
+    lines.append(f"- 检查契约数：{contract_check.get('checked_contracts', 0)}")
+    lines.append(f"- 违反契约数：{len(violations)}")
+    if violations:
+        for violation in violations[:100]:
+            contract = violation.get("contract", {})
+            lines.append(
+                f"- `{violation.get('severity', '')}` `{violation.get('file', '')}:{violation.get('line', 1)}` "
+                f"`{violation.get('type', '')}` {violation.get('message', '')} "
+                f"来源契约 `{contract.get('id', '')}`"
+            )
+    else:
+        lines.append("- 未发现当前规则支持的契约违反。")
 
     codeql = data.get("codeql", disabled_codeql_result())
     lines.extend(["", "## CodeQL 深度分析", ""])
@@ -1594,7 +1638,14 @@ def main(argv: list[str]) -> int:
         if should_confirm_contracts
         else contract_candidates
     )
+    target_inventory = None
+    if business_contracts:
+        target_inventory = codeql_target_inventory(codeql) if codeql_enabled else None
+        if target_inventory is None:
+            target_inventory = extract_semantic_inventory(project)
+    business_contract_check = evaluate_contracts(business_contracts, target_inventory)
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
+    findings.extend(contract_violations_to_findings(business_contract_check.get("violations", [])))
     if codeql_enabled:
         findings.extend(Finding(**item) for item in codeql.get("findings", []))
         findings.extend(
@@ -1613,6 +1664,7 @@ def main(argv: list[str]) -> int:
         "contract_source": contract_source,
         "contract_candidates": contract_candidates,
         "business_contracts": business_contracts,
+        "business_contract_check": business_contract_check,
         "codeql": codeql,
         "findings": [dataclasses.asdict(finding) for finding in findings],
         "summary": summarize_findings(findings),

@@ -81,4 +81,5 @@ path/to/code-change-check/run-code-change-check.cmd --project . --svn-revision 1
 - 需求、设计、任务和代码之间的缺口。
 - 需求-提交映射缺口。
 - 业务契约来源、候选契约和启用契约。
+- 业务契约执行结果和违反项。
 - CodeQL 状态、分析语言、数据库缓存状态、baseline/target 对比状态、差异命中和业务语义差异。
