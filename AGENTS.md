@@ -24,3 +24,5 @@
 - CodeQL 支撑测试：`python tests/test_codeql_support.py`
 - CodeQL 集成测试：`python tests/test_codeql_integration.py`
 - CodeQL 对比测试：`python tests/test_codeql_comparison.py`
+- 语义清单测试：`python tests/test_semantic_inventory.py`
+- CodeQL 语义查询测试：`python tests/test_codeql_semantic.py`

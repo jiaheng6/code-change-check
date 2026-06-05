@@ -22,6 +22,7 @@ def codeql_result(
     status: str,
     findings: list[dict] | None = None,
     comparison_status: str = "unsupported",
+    semantic_changes: list[dict] | None = None,
 ) -> dict:
     return {
         "enabled": True,
@@ -43,6 +44,13 @@ def codeql_result(
             "new_findings": findings or [],
             "existing_findings": [],
             "resolved_findings": [],
+            "semantic": {
+                "status": "success",
+                "message": "测试语义对比状态",
+                "baseline_inventory": {"status": "success", "engine": "lightweight", "items": []},
+                "target_inventory": {"status": "success", "engine": "lightweight", "items": []},
+                "changes": semantic_changes or [],
+            },
         },
     }
 
@@ -152,6 +160,42 @@ class CodeQLIntegrationTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 4)
         self.assertIn("## CodeQL baseline/target 对比", report)
+
+    def test_main_merges_semantic_changes_into_findings_and_report(self):
+        semantic_change = {
+            "type": "addressing-changed",
+            "severity": "critical",
+            "file": "src/client.ts",
+            "line": 2,
+            "symbol": "base-url",
+            "message": "寻址方式从 internal 变化为 public。",
+            "removed": ["internal"],
+            "added": ["public"],
+        }
+        self.tool.run_codeql_review = lambda *args, **kwargs: codeql_result(
+            "success",
+            comparison_status="success",
+            semantic_changes=[semantic_change],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir) / "project"
+            output = Path(temp_dir) / "output"
+            project.mkdir()
+            (project / "app.py").write_text("print('ok')\n", encoding="utf-8")
+
+            exit_code = self.tool.main(
+                ["--project", str(project), "--codeql", "--no-contract", "--output", str(output)]
+            )
+            evidence = json.loads(
+                (output / "code-change-check-evidence.json").read_text(encoding="utf-8")
+            )
+            report = (output / "code-change-check-report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(any(item["id"] == "semantic:addressing-changed" for item in evidence["findings"]))
+        self.assertIn("## 业务语义差异", report)
+        self.assertIn("寻址方式从 internal 变化为 public", report)
 
 
 if __name__ == "__main__":

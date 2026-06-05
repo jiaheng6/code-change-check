@@ -123,6 +123,102 @@ class CodeQLSupportTest(unittest.TestCase):
         self.assertEqual(len(create_commands), 1)
         self.assertEqual(second["databases"][0]["cache_status"], "reused")
 
+    def test_run_codeql_analysis_collects_custom_semantic_inventory(self):
+        def fake_runner(args, cwd):
+            if args[1] == "version":
+                return 0, "CodeQL command-line toolchain release 2.20.0"
+            if args[1:3] == ["resolve", "languages"]:
+                return 0, "python"
+            if args[1:3] == ["database", "create"]:
+                Path(args[3]).mkdir(parents=True)
+                return 0, "数据库创建完成"
+            if args[1:3] == ["database", "analyze"]:
+                output_arg = next(item for item in args if item.startswith("--output="))
+                output = Path(output_arg.split("=", 1)[1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(
+                    json.dumps({"version": "2.1.0", "runs": [{"tool": {"driver": {}}, "results": []}]}),
+                    encoding="utf-8",
+                )
+                return 0, "分析完成"
+            return 1, "未知命令"
+
+        self.codeql.run_codeql_semantic_queries = lambda *args, **kwargs: {
+            "status": "success",
+            "engine": "codeql",
+            "language": "python",
+            "message": "完成",
+            "errors": [],
+            "items": [
+                {
+                    "kind": "call",
+                    "file": "app.py",
+                    "line": 1,
+                    "symbol": "client.call",
+                    "argument_count": 1,
+                    "arguments": [],
+                    "engine": "codeql",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            project.mkdir()
+            (project / "app.py").write_text("client.call(value)\n", encoding="utf-8")
+
+            result = self.codeql.run_codeql_analysis(
+                project,
+                root / "output",
+                cache_root=root / "cache",
+                command_runner=fake_runner,
+            )
+
+        self.assertEqual(result["semantic_inventory"]["status"], "success")
+        self.assertEqual(result["semantic_inventory"]["items"][0]["symbol"], "client.call")
+
+    def test_run_codeql_analysis_keeps_standard_result_when_custom_query_raises(self):
+        def fake_runner(args, cwd):
+            if args[1] == "version":
+                return 0, "CodeQL command-line toolchain release 2.20.0"
+            if args[1:3] == ["resolve", "languages"]:
+                return 0, "python"
+            if args[1:3] == ["database", "create"]:
+                Path(args[3]).mkdir(parents=True)
+                return 0, "数据库创建完成"
+            if args[1:3] == ["database", "analyze"]:
+                output_arg = next(item for item in args if item.startswith("--output="))
+                output = Path(output_arg.split("=", 1)[1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(
+                    json.dumps({"version": "2.1.0", "runs": [{"tool": {"driver": {}}, "results": []}]}),
+                    encoding="utf-8",
+                )
+                return 0, "分析完成"
+            return 1, "未知命令"
+
+        self.codeql.run_codeql_semantic_queries = lambda *args, **kwargs: (_ for _ in ()).throw(
+            OSError("自定义查询执行异常")
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            project.mkdir()
+            (project / "app.py").write_text("client.call(value)\n", encoding="utf-8")
+
+            result = self.codeql.run_codeql_analysis(
+                project,
+                root / "output",
+                cache_root=root / "cache",
+                command_runner=fake_runner,
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["semantic_inventory"]["status"], "failed")
+        self.assertIn("自定义查询执行异常", result["semantic_inventory"]["message"])
+
     def test_parse_sarif_converts_result_to_finding(self):
         sarif = {
             "version": "2.1.0",

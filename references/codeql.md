@@ -11,10 +11,12 @@
 - 将 SARIF 结果转换为统一风险项，并合并到 JSON 证据包和 Markdown 报告。
 - Java-only、JavaScript/TypeScript、Python 等默认使用 `none`；检测到 Kotlin、Go 或 Swift 时默认使用 `autobuild`。
 - 将 CodeQL 命中分为新增、已有和已消失。只有两端分析都成功时才生成差异分类。
+- 对 baseline/target 提取并比较业务语义清单，当前覆盖调用参数、内部/外部寻址、租户字段和状态字段。
+- 轻量语义提取器作为降级基础；CodeQL 可用时，运行仓库内置自定义查询补充 Java/Kotlin 和 JavaScript/TypeScript 调用清单。
 
 ## 初始化时机
 
-用户确认 Git、SVN 或目录快照范围后，工具立即确定是否启用 CodeQL。启用时解析 baseline/target 来源，通过临时 Git worktree 或目录快照得到两个代码状态，再创建或复用 database。
+用户确认 Git、SVN 或目录快照范围后，工具立即确定是否启用 CodeQL。启用时解析 baseline/target 来源，通过临时 Git worktree 或目录快照得到两个代码状态，先提取轻量语义清单，再创建或复用 database。
 
 支持的对比来源：
 
@@ -93,6 +95,24 @@ run-code-change-check.cmd --project . --codeql --codeql-language java --codeql-b
 
 CodeQL 命中为零只代表已执行查询没有产生结果，不代表业务逻辑正确。
 
+## 业务语义清单
+
+业务语义清单位于 `codeql.comparison.semantic`，用于把需要逐行阅读才能发现的细微变化集中展示：
+
+- `call-arguments-changed`：同一文件中的同名调用参数数量或参数线索变化。
+- `addressing-changed`：已有内部寻址线索变为外部寻址，或反向变化。
+- `tenant-field-removed`：目标代码不再包含 baseline 中已有的租户字段线索。
+- `state-field-removed`：目标代码不再包含 baseline 中已有的状态字段线索。
+
+轻量提取器支持多种常见源码后缀，但调用识别目前以单行点号调用为主。CodeQL 自定义查询当前位于：
+
+```text
+codeql/semantic/javascript-typescript/
+codeql/semantic/java-kotlin/
+```
+
+CodeQL 自定义查询失败不会让标准 CodeQL SARIF 分析失败；报告会记录查询失败，并保留轻量语义清单作为降级结果。
+
 ## 对比状态
 
 - `disabled`：用户关闭了 baseline/target 对比。
@@ -102,8 +122,8 @@ CodeQL 命中为零只代表已执行查询没有产生结果，不代表业务�
 
 ## 后续阶段
 
-1. 执行 baseline/target 调用、参数、字段和数据流语义差异比较。
-2. 将用户确认的 `business_contracts` 转换为有限类型的 CodeQL 或 AST 可执行规则。
+1. 将用户确认的 `business_contracts` 转换为有限类型的 CodeQL 或 AST 可执行规则。
+2. 扩展跨行调用、字段格式、数据流和上下游契约差异比较。
 3. 实现 SVN revision 源代码物化。
 4. 增加项目级自定义 query pack 和 CI 集成。
 

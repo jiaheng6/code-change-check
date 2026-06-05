@@ -8,6 +8,7 @@ import tempfile
 from typing import Callable, Iterator
 
 from codeql_support import run_codeql_analysis, run_command
+from semantic_inventory import compare_semantic_inventories, extract_semantic_inventory, merge_semantic_inventories
 
 
 CommandRunner = Callable[[list[str], Path], tuple[int, str]]
@@ -184,6 +185,13 @@ def skipped_comparison(plan: dict) -> dict:
         "new_findings": [],
         "existing_findings": [],
         "resolved_findings": [],
+        "semantic": {
+            "status": plan["status"],
+            "message": plan["message"],
+            "baseline_inventory": None,
+            "target_inventory": None,
+            "changes": [],
+        },
     }
 
 
@@ -227,6 +235,10 @@ def run_codeql_review(
                     command_runner=command_runner,
                     source_scope=source_scope(plan["target"], "target"),
                 )
+                target_inventory = merge_semantic_inventories(
+                    extract_semantic_inventory(target_source),
+                    target.get("semantic_inventory"),
+                )
         except (OSError, RuntimeError, ValueError) as error:
             target = analyzer(
                 project,
@@ -244,8 +256,19 @@ def run_codeql_review(
                 "target": {"kind": "current", "value": "current-working-tree"},
                 "message": f"{plan['message']} target revision 物化失败，已降级为当前工作区：{error}",
             }
+            target_inventory = merge_semantic_inventories(
+                extract_semantic_inventory(project),
+                target.get("semantic_inventory"),
+            )
         comparison = skipped_comparison(plan)
         comparison["target_status"] = target.get("status", "")
+        comparison["semantic"] = {
+            "status": plan["status"],
+            "message": plan["message"],
+            "baseline_inventory": None,
+            "target_inventory": target_inventory,
+            "changes": [],
+        }
         target["comparison"] = comparison
         return target
 
@@ -268,6 +291,10 @@ def run_codeql_review(
                 command_runner=command_runner,
                 source_scope=source_scope(plan["baseline"], "baseline"),
             )
+            baseline_inventory = merge_semantic_inventories(
+                extract_semantic_inventory(baseline_source),
+                baseline_result.get("semantic_inventory"),
+            )
             target_result = analyzer(
                 target_source,
                 output / "target",
@@ -278,6 +305,10 @@ def run_codeql_review(
                 cache_root=effective_cache,
                 command_runner=command_runner,
                 source_scope=source_scope(plan["target"], "target"),
+            )
+            target_inventory = merge_semantic_inventories(
+                extract_semantic_inventory(target_source),
+                target_result.get("semantic_inventory"),
             )
     except (OSError, RuntimeError, ValueError) as error:
         target_result = analyzer(
@@ -295,6 +326,13 @@ def run_codeql_review(
             **skipped_comparison(plan),
             "status": "failed",
             "message": f"无法构造 CodeQL baseline/target 源代码：{error}",
+            "semantic": {
+                "status": "failed",
+                "message": f"无法构造语义清单源代码：{error}",
+                "baseline_inventory": None,
+                "target_inventory": None,
+                "changes": [],
+            },
         }
         return target_result
 
@@ -329,6 +367,11 @@ def run_codeql_review(
         "target_status": target_result.get("status", ""),
         **differences,
         "baseline_analysis": baseline_result,
+        "semantic": {
+            **compare_semantic_inventories(baseline_inventory, target_inventory),
+            "baseline_inventory": baseline_inventory,
+            "target_inventory": target_inventory,
+        },
     }
     target_result["comparison"] = comparison
     if comparison["status"] != "success" and target_result.get("status") == "success":

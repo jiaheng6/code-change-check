@@ -1113,8 +1113,31 @@ def disabled_codeql_result() -> dict:
             "new_findings": [],
             "existing_findings": [],
             "resolved_findings": [],
+            "semantic": {
+                "status": "disabled",
+                "message": "本次检查未启用业务语义对比。",
+                "baseline_inventory": None,
+                "target_inventory": None,
+                "changes": [],
+            },
         },
     }
+
+
+def semantic_changes_to_findings(changes: list[dict]) -> list[Finding]:
+    return [
+        Finding(
+            id=f"semantic:{change.get('type', 'unknown')}",
+            title=f"业务语义变化：{change.get('symbol', change.get('type', ''))}",
+            severity=change.get("severity", "high"),
+            category="业务语义",
+            file=change.get("file", ""),
+            line=int(change.get("line", 1)),
+            snippet=change.get("symbol", "")[:240],
+            message=change.get("message", "发现业务语义变化。"),
+        )
+        for change in changes
+    ]
 
 
 def load_custom_patterns(rules_path: Path | None) -> list[RiskPattern]:
@@ -1365,6 +1388,25 @@ def make_report(data: dict) -> str:
                 f"{finding.get('title', '')}：{finding.get('message', '')}"
             )
 
+    semantic = comparison.get("semantic", {})
+    semantic_changes = semantic.get("changes", [])
+    lines.extend(["", "## 业务语义差异", ""])
+    lines.append(f"- 状态：`{semantic.get('status', 'disabled')}`")
+    lines.append(f"- 说明：{semantic.get('message', '')}")
+    baseline_inventory = semantic.get("baseline_inventory") or {}
+    target_inventory = semantic.get("target_inventory") or {}
+    lines.append(f"- baseline 清单项：{len(baseline_inventory.get('items', []))}")
+    lines.append(f"- target 清单项：{len(target_inventory.get('items', []))}")
+    lines.append(f"- 语义变化数：{len(semantic_changes)}")
+    if semantic_changes:
+        for change in semantic_changes[:100]:
+            lines.append(
+                f"- `{change.get('severity', '')}` `{change.get('file', '')}:{change.get('line', 1)}` "
+                f"`{change.get('type', '')}` {change.get('message', '')}"
+            )
+    else:
+        lines.append("- 未生成语义差异，或未发现当前规则支持的语义变化。")
+
     lines.extend(["", "## 需求和任务线索", ""])
     if data["specs"]:
         for spec in data["specs"]:
@@ -1555,6 +1597,11 @@ def main(argv: list[str]) -> int:
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
     if codeql_enabled:
         findings.extend(Finding(**item) for item in codeql.get("findings", []))
+        findings.extend(
+            semantic_changes_to_findings(
+                codeql.get("comparison", {}).get("semantic", {}).get("changes", [])
+            )
+        )
 
     data = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),

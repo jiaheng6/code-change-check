@@ -56,7 +56,7 @@ path/to/code-change-check/run-code-change-check.cmd --project . --codeql --outpu
 
 当用户要求 CodeQL 必须完成时使用 `--require-codeql`。CodeQL 不可用或执行失败时，该模式必须返回失败状态。
 
-CodeQL 默认尝试 baseline/target 对比。需要关闭时追加 `--no-codeql-compare`；当用户要求对比必须成功时追加 `--require-codeql-compare`。
+CodeQL 默认尝试 baseline/target 对比。需要关闭时追加 `--no-codeql-compare`；当用户要求对比必须成功时追加 `--require-codeql-compare`。启用 CodeQL 后还会生成业务语义清单差异；CodeQL CLI 不可用时使用轻量提取器降级。
 
 如果用户提供需求、设计或任务文档，使用：
 
@@ -81,4 +81,4 @@ path/to/code-change-check/run-code-change-check.cmd --project . --svn-revision 1
 - 需求、设计、任务和代码之间的缺口。
 - 需求-提交映射缺口。
 - 业务契约来源、候选契约和启用契约。
-- CodeQL 状态、分析语言、数据库缓存状态、baseline/target 对比状态和差异命中。
+- CodeQL 状态、分析语言、数据库缓存状态、baseline/target 对比状态、差异命中和业务语义差异。

@@ -5,12 +5,16 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable
 from urllib.parse import unquote, urlparse
 
 
 CommandRunner = Callable[[list[str], Path], tuple[int, str]]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 LANGUAGE_EXTENSIONS = {
     "c-cpp": {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"},
@@ -104,6 +108,12 @@ def run_command(args: list[str], cwd: Path) -> tuple[int, str]:
         return completed.returncode, completed.stdout.strip()
     except FileNotFoundError:
         return 127, f"命令不存在：{args[0]}"
+
+
+def run_codeql_semantic_queries(*args, **kwargs):
+    from codeql_semantic import run_codeql_semantic_queries as implementation
+
+    return implementation(*args, **kwargs)
 
 
 def should_skip(path: Path) -> bool:
@@ -396,6 +406,14 @@ def run_codeql_analysis(
         "databases": [],
         "sarif_files": [],
         "findings": [],
+        "semantic_inventory": {
+            "status": "unavailable" if not environment["available"] else "pending",
+            "engine": "codeql",
+            "message": environment["message"],
+            "errors": [],
+            "items": [],
+            "languages": [],
+        },
     }
     if not environment["available"]:
         return result
@@ -518,6 +536,30 @@ def run_codeql_analysis(
             continue
         result["sarif_files"].append(str(sarif_path))
         result["findings"].extend(sarif_findings)
+        try:
+            semantic_result = run_codeql_semantic_queries(
+                database,
+                language,
+                output / "codeql-semantic",
+                executable=executable,
+                command_runner=command_runner,
+            )
+        except Exception as error:
+            semantic_result = {
+                "status": "failed",
+                "message": f"CodeQL 自定义语义查询执行异常：{error}",
+                "errors": [str(error)],
+                "items": [],
+            }
+        result["semantic_inventory"]["languages"].append(
+            {
+                "language": language,
+                "status": semantic_result.get("status", ""),
+                "message": semantic_result.get("message", ""),
+            }
+        )
+        result["semantic_inventory"]["items"].extend(semantic_result.get("items", []))
+        result["semantic_inventory"]["errors"].extend(semantic_result.get("errors", []))
 
     if analysis_failed:
         result["status"] = "partial-failure" if result["sarif_files"] else "failed"
@@ -525,4 +567,26 @@ def run_codeql_analysis(
     else:
         result["status"] = "success"
         result["message"] = "CodeQL 深度分析完成。"
+    semantic_languages = result["semantic_inventory"]["languages"]
+    if any(item["status"] == "success" for item in semantic_languages):
+        result["semantic_inventory"]["status"] = (
+            "partial-failure"
+            if any(item["status"] == "failed" for item in semantic_languages)
+            else "success"
+        )
+        result["semantic_inventory"]["message"] = "CodeQL 自定义语义查询已执行。"
+    elif any(item["status"] == "failed" for item in semantic_languages):
+        result["semantic_inventory"]["status"] = "failed"
+        failed_messages = [
+            item["message"]
+            for item in semantic_languages
+            if item["status"] == "failed" and item.get("message")
+        ]
+        detail = f" 原因：{'；'.join(failed_messages)}" if failed_messages else ""
+        result["semantic_inventory"]["message"] = (
+            f"CodeQL 自定义语义查询执行失败，已保留轻量语义清单作为降级结果。{detail}"
+        )
+    else:
+        result["semantic_inventory"]["status"] = "unsupported"
+        result["semantic_inventory"]["message"] = "当前分析语言没有可用的 CodeQL 自定义语义查询。"
     return result

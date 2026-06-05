@@ -163,6 +163,53 @@ class CodeQLComparisonTest(unittest.TestCase):
         self.assertEqual(result["comparison"]["resolved_findings"][0]["id"], "codeql:old")
         self.assertEqual(len(calls), 2)
 
+    def test_run_codeql_review_compares_semantics_even_when_codeql_is_unavailable(self):
+        def unavailable_analyzer(project, output, **kwargs):
+            return {
+                "enabled": True,
+                "available": False,
+                "status": "unavailable",
+                "message": "未安装 CodeQL",
+                "detail": "",
+                "version": "",
+                "source_scope": kwargs["source_scope"],
+                "detected_languages": [],
+                "languages": [],
+                "databases": [],
+                "sarif_files": [],
+                "findings": [],
+            }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            baseline = root / "baseline"
+            target = root / "target"
+            baseline.mkdir()
+            target.mkdir()
+            (baseline / "client.ts").write_text(
+                "OrderClient.create(tenantId, orderId, amount);\nconst url = config.internalBaseUrl;\n",
+                encoding="utf-8",
+            )
+            (target / "client.ts").write_text(
+                "OrderClient.create(orderId, amount);\nconst url = config.publicBaseUrl;\n",
+                encoding="utf-8",
+            )
+
+            result = self.comparison.run_codeql_review(
+                target,
+                root / "output",
+                {"source": "snapshot", "range": f"{baseline}..{target}"},
+                baseline_path=baseline,
+                analyzer=unavailable_analyzer,
+            )
+
+        semantic = result["comparison"]["semantic"]
+        self.assertEqual(semantic["status"], "success")
+        self.assertEqual(
+            [item["type"] for item in semantic["changes"]],
+            ["addressing-changed", "call-arguments-changed", "tenant-field-removed"],
+        )
+
     def test_run_codeql_review_does_not_mark_all_target_findings_new_when_baseline_fails(self):
         def fake_analyzer(project, output, **kwargs):
             is_baseline = kwargs["source_scope"] == "snapshot:baseline"
