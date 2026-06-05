@@ -1,5 +1,7 @@
 # code-change-check
 
+[English](README.en.md) | 简体中文
+
 `code-change-check` 是一个面向 AI 编程迭代的代码变更质量检查 Skill/CLI。
 
 它不是普通的 `git diff` 阅读器，而是把一次迭代里的提交范围、需求文档、任务列表、业务契约、语义差异和可选 CodeQL 分析放到同一个审计流程里，帮助你更快发现“代码能跑、语法也对，但业务理解错了一小块”的问题。
