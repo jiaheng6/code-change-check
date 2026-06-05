@@ -28,6 +28,8 @@ description: 用于检查 AI 或人工完成的代码变更质量，选择迭代
 path/to/code-change-check/run-code-change-check.cmd --project . --output code-change-check-output
 ```
 
+根目录启动器在没有显式变动范围时默认进入交互向导；在真实终端直接运行 Python 脚本时，主脚本也会按同样规则自动进入交互。交互向导会询问变动范围、业务契约来源和是否启用 CodeQL。CI、管道或脚本自动化使用 `--no-interactive` 关闭交互。
+
 PowerShell：
 
 ```powershell
@@ -50,6 +52,12 @@ path/to/code-change-check/run-code-change-check.cmd --project . --interactive --
 
 交互模式支持方向键移动、空格多选、回车提交、`q` 取消。Git 会展示最近提交记录，SVN 会展示最近版本记录。可用 `--commit-limit 50` 调整展示数量。
 
+非交互模式：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --no-interactive --output code-change-check-output
+```
+
 如果项目中能发现需求、设计或任务文档，交互模式会继续让用户把每个提交关联到对应需求/任务。需要跳过时使用：
 
 ```bash
@@ -71,6 +79,8 @@ path/to/code-change-check/run-code-change-check.cmd --project . --require-codeql
 ```
 
 CodeQL database 默认缓存到目标项目的 `.code-change-check/cache/codeql/`。默认尝试 baseline/target 对比；需要关闭时使用 `--no-codeql-compare`，要求对比必须成功时使用 `--require-codeql-compare`。启用 CodeQL 后，即使本地没有 CodeQL CLI，仍会运行轻量语义清单对比；CodeQL 可用时会用自定义查询补充调用清单。详细规则见 `references/codeql.md`。
+
+交互模式启用 CodeQL 但未检测到 CodeQL CLI 时，工具会询问是否查看安装方式，并给出 GitHub 官方 CodeQL CLI 安装文档链接。
 
 指定业务契约文件：
 

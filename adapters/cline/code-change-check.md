@@ -17,6 +17,8 @@
 path/to/code-change-check/run-code-change-check.cmd --project . --output code-change-check-output
 ```
 
+没有显式变动范围时，根目录启动器默认进入交互向导。自动化场景或已明确参数时，追加 `--no-interactive`。
+
 PowerShell 可使用：
 
 ```powershell

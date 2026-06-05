@@ -129,6 +129,8 @@ adapters/cline/code-change-check.md
 path/to/code-change-check/run-code-change-check.cmd --project . --output code-change-check-output
 ```
 
+通过根目录启动器运行，或在真实终端直接运行 Python 脚本时，如果没有显式传入 `--base-ref`、`--svn-revision`、`--baseline` 或 `--scan-all` 等变动范围参数，默认会进入交互向导，依次选择变动范围、业务契约来源和是否启用 CodeQL。需要用于 CI、管道或脚本自动化时，追加 `--no-interactive`。
+
 输出目录会生成：
 
 ```text
@@ -152,6 +154,16 @@ path/to/code-change-check/run-code-change-check.cmd --project . --interactive --
 - 空格选择或取消。
 - 回车提交。
 - `q` 取消。
+
+根目录的 `.cmd`、`.ps1`、`.sh` 启动器在没有显式变动范围时会自动追加 `--interactive`。如果你在真实终端直接运行 `python scripts/code_change_check.py`，主脚本也会按同样规则自动进入交互；非 TTY 环境不会自动交互。
+
+### 非交互模式
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --no-interactive --output code-change-check-output
+```
+
+非交互模式适合 CI、脚本自动化或已有明确参数的检查。该模式不会询问变动范围、契约来源或是否启用 CodeQL。
 
 ### 指定 Git 迭代范围
 
@@ -244,6 +256,8 @@ CodeQL 是可选能力。
 - 将命中分为新增、已有和已消失。
 
 如果没有安装 CodeQL CLI，工具不会把它解释为“通过”，而是在报告中明确标记 `unavailable`，并继续执行其他检查。
+
+交互模式下，如果用户选择启用 CodeQL 但本地没有安装 CodeQL CLI，工具会提示是否查看安装方式，并给出官方安装文档链接。安装后请确认 `codeql version` 可执行，再重新运行检查。
 
 ## 报告重点
 

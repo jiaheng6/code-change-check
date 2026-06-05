@@ -131,6 +131,8 @@ Run this from the target project:
 path/to/code-change-check/run-code-change-check.cmd --project . --output code-change-check-output
 ```
 
+When you use the root launchers, or run the Python script directly in a real terminal, the tool enters the interactive wizard by default if you did not explicitly pass change-scope options such as `--base-ref`, `--svn-revision`, `--baseline`, or `--scan-all`. It asks for the change scope, business contract source, and whether CodeQL should be enabled. For CI, pipes, or scripted automation, pass `--no-interactive`.
+
 The output directory contains:
 
 ```text
@@ -154,6 +156,16 @@ Interactive mode supports:
 - Space to select or unselect.
 - Enter to submit.
 - `q` to cancel.
+
+The root `.cmd`, `.ps1`, and `.sh` launchers automatically add `--interactive` when no explicit change scope is supplied. If you run `python scripts/code_change_check.py` directly in a real terminal, the main script follows the same rule; non-TTY environments do not.
+
+### Non-Interactive Mode
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --no-interactive --output code-change-check-output
+```
+
+Non-interactive mode is intended for CI, scripted automation, or runs where the scope and options are already known. It does not ask for change scope, contract source, or CodeQL enablement.
 
 ### Review A Git Range
 
@@ -246,6 +258,8 @@ When enabled, the tool tries to:
 - Classify findings as new, existing, or resolved.
 
 If CodeQL CLI is not installed, the report shows `unavailable` and the rest of the checks continue.
+
+In interactive mode, if the user enables CodeQL but CodeQL CLI is not installed, the tool asks whether to show installation instructions and prints the official setup link. After installation, make sure `codeql version` works, then rerun the check.
 
 ## Report Contents
 

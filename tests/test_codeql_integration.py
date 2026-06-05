@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
@@ -59,6 +60,54 @@ class CodeQLIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.tool = load_tool_module()
 
+    def test_default_interactive_turns_on_in_tty(self):
+        class Tty:
+            def isatty(self):
+                return True
+
+        args = self.tool.parse_args([])
+
+        changed = self.tool.apply_default_interactive(args, stdin=Tty(), stdout=Tty())
+
+        self.assertTrue(changed)
+        self.assertTrue(args.interactive)
+
+    def test_default_interactive_respects_no_interactive(self):
+        class Tty:
+            def isatty(self):
+                return True
+
+        args = self.tool.parse_args(["--no-interactive"])
+
+        changed = self.tool.apply_default_interactive(args, stdin=Tty(), stdout=Tty())
+
+        self.assertFalse(changed)
+        self.assertFalse(args.interactive)
+
+    def test_default_interactive_stays_off_outside_tty(self):
+        class NotTty:
+            def isatty(self):
+                return False
+
+        args = self.tool.parse_args([])
+
+        changed = self.tool.apply_default_interactive(args, stdin=NotTty(), stdout=NotTty())
+
+        self.assertFalse(changed)
+        self.assertFalse(args.interactive)
+
+    def test_default_interactive_respects_explicit_change_scope(self):
+        class Tty:
+            def isatty(self):
+                return True
+
+        args = self.tool.parse_args(["--base-ref", "main"])
+
+        changed = self.tool.apply_default_interactive(args, stdin=Tty(), stdout=Tty())
+
+        self.assertFalse(changed)
+        self.assertFalse(args.interactive)
+
     def test_resolve_codeql_enabled_defaults_to_disabled_outside_interactive_mode(self):
         args = self.tool.parse_args([])
 
@@ -66,12 +115,80 @@ class CodeQLIntegrationTest(unittest.TestCase):
 
         self.assertFalse(enabled)
 
+    def test_parse_args_accepts_no_interactive_for_launchers(self):
+        args = self.tool.parse_args(["--no-interactive"])
+
+        self.assertTrue(args.no_interactive)
+        self.assertFalse(args.interactive)
+
     def test_resolve_codeql_enabled_asks_in_interactive_mode(self):
         args = self.tool.parse_args(["--interactive"])
 
         enabled = self.tool.resolve_codeql_enabled(args, choose_enabled=lambda: True)
 
         self.assertTrue(enabled)
+
+    def test_prompt_missing_codeql_prints_install_guide_in_interactive_mode(self):
+        args = self.tool.parse_args(["--interactive"])
+        output = io.StringIO()
+
+        prompted = self.tool.maybe_prompt_codeql_installation(
+            args,
+            codeql_result("unavailable"),
+            read_input=lambda prompt: "y",
+            output=output,
+        )
+
+        self.assertTrue(prompted)
+        text = output.getvalue()
+        self.assertIn("未检测到 CodeQL CLI", text)
+        self.assertIn("官方安装文档", text)
+        self.assertIn("https://docs.github.com/en/code-security/codeql-cli/getting-started-with-the-codeql-cli/setting-up-the-codeql-cli", text)
+
+    def test_prompt_missing_codeql_skips_install_guide_when_input_is_unavailable(self):
+        args = self.tool.parse_args(["--interactive"])
+        output = io.StringIO()
+
+        def raise_eof(prompt):
+            raise EOFError()
+
+        prompted = self.tool.maybe_prompt_codeql_installation(
+            args,
+            codeql_result("unavailable"),
+            read_input=raise_eof,
+            output=output,
+        )
+
+        self.assertTrue(prompted)
+        self.assertIn("未收到输入", output.getvalue())
+
+    def test_main_prompts_when_interactive_codeql_is_unavailable(self):
+        prompted = []
+        self.tool.choose_codeql_enabled = lambda: True
+        self.tool.collect_interactive_changes = lambda project, limit: {
+            "source": "snapshot",
+            "range": "interactive-test",
+            "status": "",
+            "stat": "",
+            "diff": "",
+            "changed_files": ["app.py"],
+            "selected_commits": [],
+        }
+        self.tool.run_codeql_review = lambda *args, **kwargs: codeql_result("unavailable")
+        self.tool.maybe_prompt_codeql_installation = lambda args, codeql: prompted.append(codeql) or True
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir) / "project"
+            output = Path(temp_dir) / "output"
+            project.mkdir()
+            (project / "app.py").write_text("print('ok')\n", encoding="utf-8")
+
+            exit_code = self.tool.main(
+                ["--project", str(project), "--interactive", "--no-contract", "--output", str(output)]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(prompted[0]["status"], "unavailable")
 
     def test_require_codeql_compare_enables_codeql(self):
         args = self.tool.parse_args(["--require-codeql-compare"])

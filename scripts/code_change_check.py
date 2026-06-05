@@ -108,6 +108,9 @@ CONTRACT_GLOBS = [
     "*契约*.md",
 ]
 
+CODEQL_SETUP_URL = "https://docs.github.com/en/code-security/codeql-cli/getting-started-with-the-codeql-cli/setting-up-the-codeql-cli"
+GH_CODEQL_URL = "https://github.com/github/gh-codeql"
+
 
 @dataclasses.dataclass(frozen=True)
 class RiskPattern:
@@ -362,17 +365,37 @@ def parse_number_selection(raw: str, item_count: int) -> set[int]:
     return selected
 
 
+def stream_is_tty(stream) -> bool:
+    is_tty = getattr(stream, "isatty", None)
+    if not callable(is_tty):
+        return False
+    try:
+        return bool(is_tty())
+    except OSError:
+        return False
+
+
+def can_use_terminal_interaction(stdin=None, stdout=None) -> bool:
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    return stream_is_tty(stdin) and stream_is_tty(stdout)
+
+
 def choose_items(title: str, items: list[str]) -> list[str]:
     if not items:
         print("没有可选择的记录。")
         return []
-    if sys.stdin.isatty() and sys.stdout.isatty():
+    if can_use_terminal_interaction():
         return run_multiselect(title, items, read_terminal_key, sys.stdout)
 
     print(title)
     for index, item in enumerate(items, start=1):
         print(f"[{index}] {item}")
-    raw = input("请输入序号，支持 1,2,3 或 1-5：").strip()
+    try:
+        raw = input("请输入序号，支持 1,2,3 或 1-5：").strip()
+    except EOFError:
+        print("未收到输入，已跳过本次选择。")
+        return []
     selected_indexes = parse_number_selection(raw, len(items))
     return [item for index, item in enumerate(items) if index in selected_indexes]
 
@@ -1091,6 +1114,33 @@ def resolve_codeql_enabled(args: argparse.Namespace, choose_enabled=None) -> boo
     return False
 
 
+def maybe_prompt_codeql_installation(
+    args: argparse.Namespace,
+    codeql: dict,
+    read_input=None,
+    output=None,
+) -> bool:
+    if not args.interactive or codeql.get("status") != "unavailable":
+        return False
+    read_input = input if read_input is None else read_input
+    output = sys.stdout if output is None else output
+    output.write("\n未检测到 CodeQL CLI，CodeQL 深度分析已跳过。\n")
+    output.write("CodeQL 是可选依赖；未安装时，工具仍会继续生成非 CodeQL 报告。\n")
+    try:
+        answer = read_input("是否查看 CodeQL 安装方式？[y/N] ").strip().lower()
+    except EOFError:
+        output.write("未收到输入，已跳过 CodeQL 安装提示，本次继续生成报告。\n")
+        return True
+    if answer in {"y", "yes", "是"}:
+        output.write("\nCodeQL 安装方式：\n")
+        output.write(f"- 官方安装文档：{CODEQL_SETUP_URL}\n")
+        output.write(f"- GitHub CLI 扩展方案：{GH_CODEQL_URL}\n")
+        output.write("- 安装后请确认 `codeql version` 可以正常执行，再重新运行本工具。\n")
+    else:
+        output.write("已跳过 CodeQL 安装提示，本次继续生成报告。\n")
+    return True
+
+
 def disabled_codeql_result() -> dict:
     return {
         "enabled": False,
@@ -1525,7 +1575,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--base-ref", help="Git 基准引用，例如 main、HEAD~3 或某个 tag")
     parser.add_argument("--target-ref", help="Git 目标引用，默认 HEAD")
     parser.add_argument("--svn-revision", help="SVN 版本范围，例如 100:120")
-    parser.add_argument("--interactive", action="store_true", help="交互式选择本次迭代包含的 Git 提交或 SVN 版本")
+    interactive_group = parser.add_mutually_exclusive_group()
+    interactive_group.add_argument("--interactive", action="store_true", help="交互式选择本次迭代包含的 Git 提交或 SVN 版本")
+    interactive_group.add_argument("--no-interactive", action="store_true", help="关闭启动器默认交互，适合 CI 或脚本自动化")
     parser.add_argument("--commit-limit", type=int, default=30, help="交互模式展示的最近提交/版本数量")
     parser.add_argument("--map-requirements", action="store_true", help="为选中的提交交互式关联需求/任务")
     parser.add_argument("--no-map-requirements", action="store_true", help="交互模式下跳过需求-提交映射")
@@ -1565,8 +1617,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def has_explicit_change_scope(args: argparse.Namespace) -> bool:
+    return bool(
+        args.baseline
+        or args.base_ref
+        or args.target_ref
+        or args.svn_revision
+        or args.scan_all
+    )
+
+
+def apply_default_interactive(args: argparse.Namespace, stdin=None, stdout=None) -> bool:
+    if args.interactive or args.no_interactive:
+        return False
+    if has_explicit_change_scope(args):
+        return False
+    if not can_use_terminal_interaction(stdin, stdout):
+        return False
+    args.interactive = True
+    return True
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    apply_default_interactive(args)
     project = Path(args.project).resolve()
     baseline = Path(args.baseline).resolve() if args.baseline else None
     output = Path(args.output).resolve()
@@ -1605,6 +1679,7 @@ def main(argv: list[str]) -> int:
             build_command=args.codeql_build_command,
             cache_root=cache_root,
         )
+        maybe_prompt_codeql_installation(args, codeql)
     spec_files = discover_spec_files(project, args.spec)
     specs = extract_spec_summary(project, spec_files)
     requirement_items = build_requirement_items(specs)

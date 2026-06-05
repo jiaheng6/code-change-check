@@ -24,4 +24,17 @@ if [ -z "$PYTHON_CMD" ]; then
     exit 1
 fi
 
+NEED_INTERACTIVE=1
+for arg in "$@"; do
+    case "$arg" in
+        --interactive|--no-interactive|--base-ref|--base-ref=*|--target-ref|--target-ref=*|--svn-revision|--svn-revision=*|--baseline|--baseline=*|--scan-all)
+            NEED_INTERACTIVE=0
+            ;;
+    esac
+done
+
+if [ "$NEED_INTERACTIVE" = "1" ]; then
+    exec "$PYTHON_CMD" "$TOOL_SCRIPT" --interactive "$@"
+fi
+
 exec "$PYTHON_CMD" "$TOOL_SCRIPT" "$@"

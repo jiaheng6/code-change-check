@@ -11,7 +11,7 @@
 
 ## 步骤
 
-1. 确认变更来源：Git 优先，其次 SVN；没有版本管理时使用目录快照。优先使用 `--interactive` 让用户用方向键、空格和回车选择本次迭代包含的提交记录。Git 也可通过 `--base-ref` 和 `--target-ref` 检查一次迭代范围，SVN 也可通过 `--svn-revision` 检查版本范围。
+1. 确认变更来源：Git 优先，其次 SVN；没有版本管理时使用目录快照。没有显式变动范围时，根目录启动器默认进入交互向导；真实终端直接运行 Python 脚本时也会自动进入交互，让用户用方向键、空格和回车选择本次迭代包含的提交记录；自动化场景使用 `--no-interactive` 关闭。Git 也可通过 `--base-ref` 和 `--target-ref` 检查一次迭代范围，SVN 也可通过 `--svn-revision` 检查版本范围。
 2. 确认是否启用 CodeQL：交互模式询问用户；非交互模式使用 `--codeql` 或 `--require-codeql`。
 3. 初始化 CodeQL baseline/target 分析：可靠构造两个代码状态，先提取轻量语义清单；CodeQL CLI 可用时再创建或复用数据库，执行标准查询、自定义语义查询并保存 SARIF。
 4. 收集需求证据：读取 OpenSpec、spec-kit、superpowers、Markdown、todo 和用户补充说明。
@@ -37,6 +37,7 @@
 - 已启用的业务契约必须进入执行检查；无法执行的契约仍保留在报告中，作为人工复核线索。
 - 对旧逻辑和隐式规则保持怀疑，尤其是调用链、寻址、权限和状态流转。
 - CodeQL 未启用、不可用或执行失败都必须在报告中明确展示，不能解释为检查通过。
+- 交互模式下用户启用 CodeQL 但本机没有 CodeQL CLI 时，必须提示安装方式或跳过本次 CodeQL 分析。
 - 只有 baseline 和 target CodeQL 分析都成功时，才允许生成新增、已有和已消失分类。
 - Git 显式范围、连续选中提交、Git 工作区和目录快照支持 CodeQL 对比；非连续 Git 提交和 SVN 暂时降级为 target-only。
 - 轻量语义清单用于 CodeQL 不可用时的降级检查，只能提供风险线索，不能代替语言级 AST、编译器或真实运行验证。

@@ -48,5 +48,29 @@ if (-not $pythonCommand) {
     exit 1
 }
 
-& $pythonCommand @pythonArgs $toolScript @ToolArgs
+function Test-HasOption {
+    param(
+        [string[]] $InputArgs,
+        [string[]] $Names
+    )
+
+    foreach ($arg in $InputArgs) {
+        foreach ($name in $Names) {
+            if ($arg -ieq $name -or $arg.StartsWith("$name=", [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+$effectiveArgs = @()
+$hasInteractiveOption = Test-HasOption -InputArgs $ToolArgs -Names @("--interactive", "--no-interactive")
+$hasScopeOption = Test-HasOption -InputArgs $ToolArgs -Names @("--base-ref", "--target-ref", "--svn-revision", "--baseline", "--scan-all")
+if (-not $hasInteractiveOption -and -not $hasScopeOption) {
+    $effectiveArgs += "--interactive"
+}
+$effectiveArgs += $ToolArgs
+
+& $pythonCommand @pythonArgs $toolScript @effectiveArgs
 exit $LASTEXITCODE

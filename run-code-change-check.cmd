@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 set "SCRIPT_DIR=%~dp0"
@@ -29,5 +29,21 @@ if not defined PYTHON_CMD (
     exit /b 1
 )
 
-%PYTHON_CMD% "%TOOL_SCRIPT%" %*
+set "DEFAULT_INTERACTIVE=--interactive"
+for %%A in (%*) do (
+    set "ARG=%%~A"
+    if /I "%%~A"=="--interactive" set "DEFAULT_INTERACTIVE="
+    if /I "%%~A"=="--no-interactive" set "DEFAULT_INTERACTIVE="
+    if /I "%%~A"=="--base-ref" set "DEFAULT_INTERACTIVE="
+    if /I "!ARG:~0,11!"=="--base-ref=" set "DEFAULT_INTERACTIVE="
+    if /I "%%~A"=="--target-ref" set "DEFAULT_INTERACTIVE="
+    if /I "!ARG:~0,13!"=="--target-ref=" set "DEFAULT_INTERACTIVE="
+    if /I "%%~A"=="--svn-revision" set "DEFAULT_INTERACTIVE="
+    if /I "!ARG:~0,15!"=="--svn-revision=" set "DEFAULT_INTERACTIVE="
+    if /I "%%~A"=="--baseline" set "DEFAULT_INTERACTIVE="
+    if /I "!ARG:~0,11!"=="--baseline=" set "DEFAULT_INTERACTIVE="
+    if /I "%%~A"=="--scan-all" set "DEFAULT_INTERACTIVE="
+)
+
+%PYTHON_CMD% "%TOOL_SCRIPT%" %DEFAULT_INTERACTIVE% %*
 exit /b %ERRORLEVEL%
