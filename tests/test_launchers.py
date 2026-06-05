@@ -22,6 +22,7 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("--base-ref", content)
         self.assertIn("--svn-revision", content)
         self.assertIn("--baseline", content)
+        self.assertIn("--print-context", content)
 
     def test_powershell_launcher_checks_python_and_py(self):
         launcher = ROOT / "run-code-change-check.ps1"
@@ -37,6 +38,7 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("--base-ref", content)
         self.assertIn("--svn-revision", content)
         self.assertIn("--baseline", content)
+        self.assertIn("--print-context", content)
 
     def test_shell_launcher_checks_python3_and_python(self):
         launcher = ROOT / "run-code-change-check.sh"
@@ -52,6 +54,7 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("--base-ref", content)
         self.assertIn("--svn-revision", content)
         self.assertIn("--baseline", content)
+        self.assertIn("--print-context", content)
 
 
 if __name__ == "__main__":

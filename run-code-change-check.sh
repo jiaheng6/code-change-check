@@ -27,7 +27,7 @@ fi
 NEED_INTERACTIVE=1
 for arg in "$@"; do
     case "$arg" in
-        --interactive|--no-interactive|--base-ref|--base-ref=*|--target-ref|--target-ref=*|--svn-revision|--svn-revision=*|--baseline|--baseline=*|--scan-all)
+        --interactive|--no-interactive|--base-ref|--base-ref=*|--target-ref|--target-ref=*|--svn-revision|--svn-revision=*|--baseline|--baseline=*|--scan-all|--print-context)
             NEED_INTERACTIVE=0
             ;;
     esac

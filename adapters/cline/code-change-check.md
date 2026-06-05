@@ -19,6 +19,8 @@ path/to/code-change-check/run-code-change-check.cmd --project . --output code-ch
 
 没有显式变动范围时，根目录启动器默认进入交互向导。自动化场景或已明确参数时，追加 `--no-interactive`。
 
+如果当前环境没有可交互 TTY，禁止直接执行审计命令。先运行 `--print-context`，识别 Git/SVN 根目录；如果当前目录是 SVN 工作副本子目录，先询问用户审计当前子目录还是 SVN 工作副本根目录，再询问变动范围、业务契约来源和是否启用 CodeQL。
+
 PowerShell 可使用：
 
 ```powershell

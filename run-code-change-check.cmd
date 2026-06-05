@@ -43,6 +43,7 @@ for %%A in (%*) do (
     if /I "%%~A"=="--baseline" set "DEFAULT_INTERACTIVE="
     if /I "!ARG:~0,11!"=="--baseline=" set "DEFAULT_INTERACTIVE="
     if /I "%%~A"=="--scan-all" set "DEFAULT_INTERACTIVE="
+    if /I "%%~A"=="--print-context" set "DEFAULT_INTERACTIVE="
 )
 
 %PYTHON_CMD% "%TOOL_SCRIPT%" %DEFAULT_INTERACTIVE% %*

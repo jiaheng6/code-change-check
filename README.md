@@ -107,6 +107,15 @@ sh /path/to/code-change-check/run-code-change-check.sh --project . --output code
 ~/.claude/skills/code-change-check/
 ```
 
+在 Claude Code 中通过 `/code-change-check` 触发时，Claude Code 的 shell 通常不是可交互 TTY。此时不要依赖 CLI 的方向键交互，技能会先运行预检并在聊天里向你确认：
+
+- 审计当前目录还是 Git/SVN 工作副本根目录。
+- 本次迭代包含哪些 Git 提交或 SVN revision。
+- 业务契约来源。
+- 是否启用 CodeQL，以及缺少 CodeQL CLI 时是否查看安装方式。
+
+确认后再用 `--no-interactive` 和显式参数执行检查。
+
 ### 方式四：接入 Cline
 
 将规则文件复制到目标项目：
@@ -164,6 +173,14 @@ path/to/code-change-check/run-code-change-check.cmd --project . --no-interactive
 ```
 
 非交互模式适合 CI、脚本自动化或已有明确参数的检查。该模式不会询问变动范围、契约来源或是否启用 CodeQL。
+
+### 输出项目上下文
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --print-context
+```
+
+该命令只输出 JSON，不生成报告。Claude Code、Cline 等无 TTY 环境应先用它识别 Git/SVN 根目录；如果当前目录是 SVN 工作副本子目录，先询问用户检查当前子目录还是 SVN 工作副本根目录。
 
 ### 指定 Git 迭代范围
 

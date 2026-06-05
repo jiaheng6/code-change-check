@@ -108,6 +108,18 @@ class CodeQLIntegrationTest(unittest.TestCase):
         self.assertFalse(changed)
         self.assertFalse(args.interactive)
 
+    def test_default_interactive_respects_print_context(self):
+        class Tty:
+            def isatty(self):
+                return True
+
+        args = self.tool.parse_args(["--print-context"])
+
+        changed = self.tool.apply_default_interactive(args, stdin=Tty(), stdout=Tty())
+
+        self.assertFalse(changed)
+        self.assertFalse(args.interactive)
+
     def test_resolve_codeql_enabled_defaults_to_disabled_outside_interactive_mode(self):
         args = self.tool.parse_args([])
 

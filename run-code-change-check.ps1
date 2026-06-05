@@ -66,7 +66,7 @@ function Test-HasOption {
 
 $effectiveArgs = @()
 $hasInteractiveOption = Test-HasOption -InputArgs $ToolArgs -Names @("--interactive", "--no-interactive")
-$hasScopeOption = Test-HasOption -InputArgs $ToolArgs -Names @("--base-ref", "--target-ref", "--svn-revision", "--baseline", "--scan-all")
+$hasScopeOption = Test-HasOption -InputArgs $ToolArgs -Names @("--base-ref", "--target-ref", "--svn-revision", "--baseline", "--scan-all", "--print-context")
 if (-not $hasInteractiveOption -and -not $hasScopeOption) {
     $effectiveArgs += "--interactive"
 }

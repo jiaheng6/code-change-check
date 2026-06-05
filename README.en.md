@@ -109,6 +109,15 @@ Put this repository under the Claude skills directory, for example:
 ~/.claude/skills/code-change-check/
 ```
 
+When triggered through `/code-change-check` in Claude Code, the shell is usually not an interactive TTY. Do not rely on arrow-key CLI interaction in that environment. The skill should run a preflight check and ask in chat:
+
+- whether to review the current directory or the Git/SVN working-copy root;
+- which Git commits or SVN revisions belong to this iteration;
+- which business contract source to use;
+- whether CodeQL should be enabled, and whether to show setup instructions when CodeQL CLI is missing.
+
+After confirmation, run the check with `--no-interactive` and explicit arguments.
+
 ### Option 4: Use With Cline
 
 Copy the Cline adapter into your target project:
@@ -166,6 +175,14 @@ path/to/code-change-check/run-code-change-check.cmd --project . --no-interactive
 ```
 
 Non-interactive mode is intended for CI, scripted automation, or runs where the scope and options are already known. It does not ask for change scope, contract source, or CodeQL enablement.
+
+### Print Project Context
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --print-context
+```
+
+This prints JSON only and does not generate a report. Claude Code, Cline, and other non-TTY environments should use it first to detect the Git/SVN root. If the current directory is an SVN working-copy subdirectory, ask whether to review the current subdirectory or the SVN working-copy root.
 
 ### Review A Git Range
 

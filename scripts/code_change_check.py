@@ -405,11 +405,88 @@ def is_git_repo(project: Path) -> bool:
     return code == 0
 
 
+def git_working_tree_root(project: Path) -> Path | None:
+    code, output = run_command(["git", "rev-parse", "--show-toplevel"], project)
+    if code != 0 or not output.strip():
+        return None
+    return Path(output.strip()).resolve()
+
+
+def parse_svn_info(text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+def svn_working_copy_root(project: Path) -> Path | None:
+    code, output = run_command(["svn", "info", "--show-item", "wc-root"], project)
+    if code == 0 and output.strip():
+        return Path(output.strip()).resolve()
+
+    code, output = run_command(["svn", "info"], project)
+    if code != 0:
+        return None
+    parsed = parse_svn_info(output)
+    root = parsed.get("Working Copy Root Path")
+    if not root:
+        return None
+    return Path(root).resolve()
+
+
 def is_svn_repo(project: Path) -> bool:
-    if (project / ".svn").exists():
+    return svn_working_copy_root(project) is not None
+
+
+def is_relative_to_path(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
         return True
-    code, _ = run_command(["svn", "info"], project)
-    return code == 0
+    except ValueError:
+        return False
+
+
+def detect_repository_context(project: Path) -> dict:
+    project_path = project.resolve()
+    git_root = git_working_tree_root(project_path)
+    if git_root is not None:
+        is_root = project_path == git_root
+        return {
+            "vcs": "git",
+            "project": str(project_path),
+            "root": str(git_root),
+            "project_is_vcs_root": is_root,
+            "recommended_project": str(git_root if is_relative_to_path(project_path, git_root) else project_path),
+            "message": "当前目录是 Git 工作树根目录。"
+            if is_root
+            else "当前目录是 Git 工作树子目录，请先确认审计当前目录还是 Git 工作树根目录。",
+        }
+
+    svn_root = svn_working_copy_root(project_path)
+    if svn_root is not None:
+        is_root = project_path == svn_root
+        return {
+            "vcs": "svn",
+            "project": str(project_path),
+            "root": str(svn_root),
+            "project_is_vcs_root": is_root,
+            "recommended_project": str(svn_root if is_relative_to_path(project_path, svn_root) else project_path),
+            "message": "当前目录是 SVN 工作副本根目录。"
+            if is_root
+            else "当前目录是 SVN 工作副本子目录，请先确认审计当前目录还是 SVN 工作副本根目录。",
+        }
+
+    return {
+        "vcs": "none",
+        "project": str(project_path),
+        "root": "",
+        "project_is_vcs_root": False,
+        "recommended_project": str(project_path),
+        "message": "当前目录未检测到 Git 或 SVN 工作副本，建议使用目录快照或显式指定项目根目录。",
+    }
 
 
 def normalize_relative(path: Path, root: Path) -> str:
@@ -1614,6 +1691,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--codeql-cache", help="指定 CodeQL database 缓存目录")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
+    parser.add_argument("--print-context", action="store_true", help="输出项目版本控制上下文后退出，供 AI 适配器预检")
     return parser.parse_args(argv)
 
 
@@ -1624,6 +1702,7 @@ def has_explicit_change_scope(args: argparse.Namespace) -> bool:
         or args.target_ref
         or args.svn_revision
         or args.scan_all
+        or args.print_context
     )
 
 
@@ -1648,6 +1727,9 @@ def main(argv: list[str]) -> int:
     if not project.exists() or not project.is_dir():
         print(f"项目目录不存在：{project}", file=sys.stderr)
         return 2
+    if args.print_context:
+        print(json.dumps(detect_repository_context(project), ensure_ascii=False, indent=2))
+        return 0
     if baseline is not None and (not baseline.exists() or not baseline.is_dir()):
         print(f"baseline 目录不存在：{baseline}", file=sys.stderr)
         return 2

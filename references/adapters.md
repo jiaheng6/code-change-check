@@ -12,6 +12,14 @@
 
 Windows 用户优先运行根目录的 `run-code-change-check.cmd` 或 `run-code-change-check.ps1`。macOS/Linux 用户优先运行 `run-code-change-check.sh`。启动器会检测 Python 3.10+，没有时会给出中文安装提示。没有显式变动范围时，启动器默认进入交互向导；自动化场景追加 `--no-interactive`。
 
+Claude Code 的 `/code-change-check` 触发后，禁止直接执行审计命令。先运行：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --print-context
+```
+
+如果返回 SVN 工作副本根目录和当前目录不同，先在聊天里问用户审计当前子目录还是 SVN 工作副本根目录。随后继续问变动范围、业务契约来源和是否启用 CodeQL，确认后再用 `--no-interactive` 加显式参数运行。
+
 ## Codex
 
 将仓库复制或克隆到：
