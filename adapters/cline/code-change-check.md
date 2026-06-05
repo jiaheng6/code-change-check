@@ -8,6 +8,7 @@
 - `references/workflow.md`
 - `references/risk-rules.md`
 - `references/business-contracts.md`
+- `references/codeql.md`
 - `references/adapters.md`
 
 需要提取证据时，运行：
@@ -47,6 +48,14 @@ path/to/code-change-check/run-code-change-check.cmd --project . --interactive --
 
 旧代码候选契约必须让用户确认后再用于审计。用户明确不需要确认时追加 `--no-confirm-contracts`。
 
+交互模式会询问是否启用 CodeQL。非交互模式需要显式使用：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --codeql --output code-change-check-output
+```
+
+当用户要求 CodeQL 必须完成时使用 `--require-codeql`。CodeQL 不可用或执行失败时，该模式必须返回失败状态。
+
 如果用户提供需求、设计或任务文档，使用：
 
 ```bash
@@ -70,3 +79,4 @@ path/to/code-change-check/run-code-change-check.cmd --project . --svn-revision 1
 - 需求、设计、任务和代码之间的缺口。
 - 需求-提交映射缺口。
 - 业务契约来源、候选契约和启用契约。
+- CodeQL 状态、分析语言、数据库缓存状态和命中。

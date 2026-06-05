@@ -1,6 +1,6 @@
 ---
 name: code-change-check
-description: 用于检查 AI 或人工完成的代码变更质量，选择迭代提交范围，关联需求与提交，选择业务契约来源，从指定契约文件或迭代前旧代码提取候选契约，并发现需求实现偏差、旧逻辑兼容问题、内部寻址错误、权限遗漏、状态流转错误、第三方对接风险、数据库写入风险和高风险调用，支持 Git、SVN、目录快照、OpenSpec、spec-kit、superpowers、Markdown 需求和任务列表。
+description: 用于检查 AI 或人工完成的代码变更质量，选择迭代提交范围，关联需求与提交，选择业务契约来源，从指定契约文件或迭代前旧代码提取候选契约，并结合可选 CodeQL 深度分析发现需求实现偏差、旧逻辑兼容问题、内部寻址错误、权限遗漏、状态流转错误、第三方对接风险、数据库写入风险和高风险调用，支持 Git、SVN、目录快照、OpenSpec、spec-kit、superpowers、Markdown 需求和任务列表。
 ---
 
 # 代码变更检查
@@ -11,12 +11,13 @@ description: 用于检查 AI 或人工完成的代码变更质量，选择迭代
 
 1. 明确检查范围：确认项目根目录、需求/设计/任务文档位置、版本来源和用户特别关注的风险。
 2. 收集变更证据：优先识别 Git，其次 SVN；没有版本管理时使用目录快照或全量扫描。
-3. 收集需求证据：读取 OpenSpec、spec-kit、superpowers、Markdown 需求、任务列表和用户补充说明。
-4. 确认业务契约来源：使用指定契约文件、从迭代前旧代码提取、两者都用或不使用。
-5. 让用户确认从旧代码和契约文件中提取出的候选契约，避免把历史坏代码直接当标准。
-6. 运行 `scripts/code_change_check.py` 生成审计证据包和 Markdown 报告。
-7. 基于报告继续人工推理，重点解释高风险位置，不要只复述扫描结果。
-8. 输出结论时必须包含文件、行号、风险原因和建议验证方式。
+3. 确认是否启用 CodeQL。启用后检测 CLI、语言和缓存，并对当前工作目录创建或复用 target database。
+4. 收集需求证据：读取 OpenSpec、spec-kit、superpowers、Markdown 需求、任务列表和用户补充说明。
+5. 确认业务契约来源：使用指定契约文件、从迭代前旧代码提取、两者都用或不使用。
+6. 让用户确认从旧代码和契约文件中提取出的候选契约，避免把历史坏代码直接当标准。
+7. 运行 `scripts/code_change_check.py` 生成审计证据包和 Markdown 报告。
+8. 基于报告继续人工推理，重点解释高风险位置，不要只复述扫描结果。
+9. 输出结论时必须包含文件、行号、风险原因和建议验证方式。
 
 ## 推荐命令
 
@@ -55,6 +56,20 @@ path/to/code-change-check/run-code-change-check.cmd --project . --interactive --
 ```
 
 交互模式还会让用户选择业务契约来源，并确认本次启用的候选契约。旧代码来源会优先扫描迭代前的 Git/SVN baseline，不会把本次新增代码当作旧标准。
+
+交互模式会询问是否启用 CodeQL。非交互模式默认不启用，需要显式追加 `--codeql`：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --codeql --output code-change-check-output
+```
+
+要求 CodeQL 必须成功，否则返回非零状态：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --require-codeql --output code-change-check-output
+```
+
+CodeQL database 默认缓存到目标项目的 `.code-change-check/cache/codeql/`。当前阶段分析项目当前工作目录，尚未为用户选择的历史提交构造独立 target worktree。详细规则见 `references/codeql.md`。
 
 指定业务契约文件：
 
@@ -122,5 +137,6 @@ path/to/code-change-check/run-code-change-check.cmd --project after --baseline b
 5. 需求、设计、任务和代码之间的缺口。
 6. 需求-提交映射，以及没有关联需求的提交、没有关联提交的需求。
 7. 业务契约来源、候选契约、启用契约和缺少契约的高风险位置。
+8. CodeQL 是否启用、分析状态、语言、数据库缓存状态和 SARIF 命中。
 
 如果报告证据不足，明确说明缺少什么证据，而不是凭感觉判断安全。

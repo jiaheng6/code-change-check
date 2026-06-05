@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Iterable
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from codeql_support import run_codeql_analysis
+
+
 TEXT_EXTENSIONS = {
     ".c",
     ".cc",
@@ -58,6 +65,7 @@ TEXT_EXTENSIONS = {
 }
 
 SKIP_DIRS = {
+    ".code-change-check",
     ".git",
     ".idea",
     ".svn",
@@ -390,6 +398,16 @@ def should_skip(path: Path) -> bool:
     return any(part in SKIP_DIRS for part in path.parts)
 
 
+def filter_changed_files(paths: Iterable[str]) -> list[str]:
+    return sorted(
+        {
+            path
+            for path in paths
+            if path and not should_skip(Path(path.replace("\\", "/")))
+        }
+    )
+
+
 def is_text_file(path: Path) -> bool:
     if path.suffix.lower() in TEXT_EXTENSIONS:
         return True
@@ -502,7 +520,7 @@ def collect_git_selected_commits(project: Path, commits: list[dict]) -> dict:
         "status": status if status_code == 0 else "",
         "stat": "\n\n".join(stat_parts),
         "diff": "\n\n".join(diff_parts),
-        "changed_files": sorted(changed),
+        "changed_files": filter_changed_files(changed),
     }
 
 
@@ -529,7 +547,7 @@ def collect_svn_selected_revisions(project: Path, revisions: list[dict]) -> dict
         "status": status if status_code == 0 else "",
         "stat": "",
         "diff": "\n\n".join(diff_parts),
-        "changed_files": sorted(changed),
+        "changed_files": filter_changed_files(changed),
     }
 
 
@@ -593,7 +611,7 @@ def collect_git_changes(project: Path, base_ref: str | None, target_ref: str | N
         "status": status,
         "stat": stat if stat_code == 0 else "",
         "diff": diff if diff_code == 0 else "",
-        "changed_files": sorted(changed),
+        "changed_files": filter_changed_files(changed),
     }
 
 
@@ -621,7 +639,7 @@ def collect_svn_changes(project: Path, svn_revision: str | None) -> dict:
         "status": status if status_code == 0 else "",
         "stat": "",
         "diff": diff if diff_code == 0 else "",
-        "changed_files": sorted(set(changed)),
+        "changed_files": filter_changed_files(changed),
     }
 
 
@@ -667,7 +685,7 @@ def collect_snapshot_changes(project: Path, baseline: Path | None) -> dict:
         "status": f"baseline={baseline}",
         "stat": "",
         "diff": "",
-        "changed_files": sorted(set(changed)),
+        "changed_files": filter_changed_files(changed),
     }
 
 
@@ -1055,6 +1073,39 @@ def confirm_business_contracts(contracts: list[dict], choose_contracts=None) -> 
     return [contract for label, contract in zip(labels, contracts) if label in selected_set]
 
 
+def choose_codeql_enabled() -> bool:
+    labels = ["启用 CodeQL 深度分析"]
+    return bool(choose_items("请选择是否启用 CodeQL 深度分析", labels))
+
+
+def resolve_codeql_enabled(args: argparse.Namespace, choose_enabled=None) -> bool:
+    if args.no_codeql:
+        return False
+    if args.codeql or args.require_codeql:
+        return True
+    if args.interactive:
+        chooser = choose_enabled or choose_codeql_enabled
+        return bool(chooser())
+    return False
+
+
+def disabled_codeql_result() -> dict:
+    return {
+        "enabled": False,
+        "available": False,
+        "status": "disabled",
+        "message": "本次检查未启用 CodeQL 深度分析。",
+        "detail": "",
+        "version": "",
+        "source_scope": "",
+        "detected_languages": [],
+        "languages": [],
+        "databases": [],
+        "sarif_files": [],
+        "findings": [],
+    }
+
+
 def load_custom_patterns(rules_path: Path | None) -> list[RiskPattern]:
     if rules_path is None:
         return []
@@ -1249,6 +1300,32 @@ def make_report(data: dict) -> str:
     else:
         lines.append("- 未启用或未提取到业务契约。")
 
+    codeql = data.get("codeql", disabled_codeql_result())
+    lines.extend(["", "## CodeQL 深度分析", ""])
+    lines.append(f"- 是否启用：{'是' if codeql.get('enabled') else '否'}")
+    lines.append(f"- 状态：`{codeql.get('status', 'disabled')}`")
+    lines.append(f"- CodeQL CLI 可用：{'是' if codeql.get('available') else '否'}")
+    if codeql.get("version"):
+        lines.append(f"- 版本：`{codeql['version']}`")
+    if codeql.get("source_scope"):
+        lines.append(f"- 分析代码范围：`{codeql['source_scope']}`")
+    lines.append(f"- 检测语言：{', '.join(codeql.get('detected_languages', [])) or '无'}")
+    lines.append(f"- 分析语言：{', '.join(codeql.get('languages', [])) or '无'}")
+    lines.append(f"- CodeQL 风险命中数：{len(codeql.get('findings', []))}")
+    lines.append(f"- 说明：{codeql.get('message', '')}")
+    if codeql.get("databases"):
+        lines.append("")
+        lines.append("数据库：")
+        for database in codeql["databases"]:
+            lines.append(
+                f"- `{database.get('language', '')}` 构建模式 `{database.get('build_mode', '')}` "
+                f"缓存 `{database.get('cache_status', '')}` 路径 `{database.get('path', '')}`"
+            )
+            if database.get("message"):
+                lines.append(f"  - 错误：{database['message'][:500]}")
+    if codeql.get("detail"):
+        lines.append(f"- 详情：{codeql['detail'][:500]}")
+
     lines.extend(["", "## 需求和任务线索", ""])
     if data["specs"]:
         for spec in data["specs"]:
@@ -1339,6 +1416,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--confirm-contracts", action="store_true", help="交互确认本次审计启用的候选契约")
     parser.add_argument("--no-confirm-contracts", action="store_true", help="跳过候选契约确认并启用全部候选契约")
     parser.add_argument("--rules", help="自定义 JSON 风险规则文件")
+    codeql_group = parser.add_mutually_exclusive_group()
+    codeql_group.add_argument("--codeql", action="store_true", help="启用 CodeQL 深度分析")
+    codeql_group.add_argument("--no-codeql", action="store_true", help="禁用 CodeQL 深度分析")
+    parser.add_argument("--require-codeql", action="store_true", help="要求 CodeQL 分析成功，否则返回失败状态")
+    parser.add_argument("--codeql-executable", default="codeql", help="CodeQL CLI 可执行命令或路径")
+    parser.add_argument("--codeql-language", action="append", default=[], help="指定 CodeQL 分析语言，可重复传入")
+    parser.add_argument(
+        "--codeql-build-mode",
+        choices=["none", "autobuild", "manual"],
+        help="指定 CodeQL database 创建使用的构建模式",
+    )
+    parser.add_argument("--codeql-build-command", help="指定 CodeQL database 创建使用的构建命令")
+    parser.add_argument("--codeql-cache", help="指定 CodeQL database 缓存目录")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
     return parser.parse_args(argv)
@@ -1363,6 +1453,24 @@ def main(argv: list[str]) -> int:
         changes = collect_interactive_changes(project, args.commit_limit)
     else:
         changes = collect_changes(project, baseline, args.base_ref, args.target_ref, args.svn_revision)
+    codeql_enabled = resolve_codeql_enabled(args)
+    codeql = disabled_codeql_result()
+    if codeql_enabled:
+        cache_root = None
+        if args.codeql_cache:
+            cache_root = Path(args.codeql_cache)
+            if not cache_root.is_absolute():
+                cache_root = project / cache_root
+            cache_root = cache_root.resolve()
+        codeql = run_codeql_analysis(
+            project,
+            output,
+            languages=args.codeql_language or None,
+            executable=args.codeql_executable,
+            build_mode=args.codeql_build_mode,
+            build_command=args.codeql_build_command,
+            cache_root=cache_root,
+        )
     spec_files = discover_spec_files(project, args.spec)
     specs = extract_spec_summary(project, spec_files)
     requirement_items = build_requirement_items(specs)
@@ -1397,6 +1505,8 @@ def main(argv: list[str]) -> int:
         else contract_candidates
     )
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
+    if codeql_enabled:
+        findings.extend(Finding(**item) for item in codeql.get("findings", []))
 
     data = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -1408,6 +1518,7 @@ def main(argv: list[str]) -> int:
         "contract_source": contract_source,
         "contract_candidates": contract_candidates,
         "business_contracts": business_contracts,
+        "codeql": codeql,
         "findings": [dataclasses.asdict(finding) for finding in findings],
         "summary": summarize_findings(findings),
         "mermaid": build_mermaid(findings),
@@ -1425,6 +1536,10 @@ def main(argv: list[str]) -> int:
         print(f"风险命中数：{len(findings)}")
     else:
         print("未发现内置风险命中。")
+    print(f"CodeQL 状态：{codeql['status']}，{codeql['message']}")
+    if args.require_codeql and codeql["status"] != "success":
+        print("CodeQL 是本次检查的必需项，但未成功完成。", file=sys.stderr)
+        return 3
     return 0
 
 
