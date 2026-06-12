@@ -24,6 +24,7 @@ from contract_rules import evaluate_contracts
 from codeql_comparison import run_codeql_review
 from semantic_inventory import extract_semantic_inventory, extract_text_inventory
 from audit_plan import apply_audit_plan, build_audit_plan, confirm_audit_plan, load_audit_plan, save_audit_plan
+from finding_filter import partition_findings, summarize_suppressed
 
 
 TEXT_EXTENSIONS = {
@@ -133,6 +134,9 @@ class Finding:
     line: int
     snippet: str
     message: str
+    source: str = "text-rule"
+    file_role: str = "production"
+    suppression_reason: str = ""
 
 
 @dataclasses.dataclass
@@ -1062,17 +1066,98 @@ def extract_contracts_from_text(file: str, text: str, source: str = "contract-fi
     return contracts
 
 
+def json_shape_paths(value: object, prefix: str = "") -> list[str]:
+    paths = []
+    if isinstance(value, dict):
+        for key in sorted(value):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            paths.append(path)
+            paths.extend(json_shape_paths(value[key], path))
+    elif isinstance(value, list):
+        array_path = f"{prefix}[]" if prefix else "[]"
+        paths.append(array_path)
+        for item in value:
+            paths.extend(json_shape_paths(item, array_path))
+    return sorted(set(paths))
+
+
+def json_shape_constants(
+    value: object,
+    prefix: str = "",
+    collected: dict[str, set[str]] | None = None,
+) -> dict[str, str]:
+    collected = collected if collected is not None else {}
+    if isinstance(value, dict):
+        for key in sorted(value):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            json_shape_constants(value[key], path, collected)
+    elif isinstance(value, list):
+        array_path = f"{prefix}[]" if prefix else "[]"
+        for item in value:
+            json_shape_constants(item, array_path, collected)
+    elif isinstance(value, str) and prefix.rsplit(".", 1)[-1].lower() == "label":
+        collected.setdefault(prefix, set()).add(value)
+    return {
+        path: next(iter(values))
+        for path, values in sorted(collected.items())
+        if len(values) == 1
+    }
+
+
+def extract_json_shape_contract(file: str, text: str) -> dict | None:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    paths = json_shape_paths(value)
+    return {
+        "id": "C1",
+        "source": "contract-file",
+        "file": file,
+        "line": 1,
+        "kind": "json-shape",
+        "match_key": Path(file).stem.lower(),
+        "text": f"JSON 响应形状契约，共 {len(paths)} 个字段路径。",
+        "shape": {
+            "paths": paths,
+            "constants": json_shape_constants(value),
+        },
+    }
+
+
 def extract_contracts_from_files(project: Path, contract_files: list[Path]) -> list[dict]:
     contracts = []
     for path in contract_files:
+        file = normalize_relative(path, project)
+        text = read_text(path)
+        if path.suffix.lower() == ".json":
+            contract = extract_json_shape_contract(file, text)
+            if contract:
+                contracts.append(contract)
+                continue
         contracts.extend(
             extract_contracts_from_text(
-                normalize_relative(path, project),
-                read_text(path),
+                file,
+                text,
                 source="contract-file",
             )
         )
     return renumber_contracts(contracts)
+
+
+def load_response_snapshots(project: Path, entries: list[str]) -> dict[str, dict]:
+    snapshots = {}
+    for path in expand_explicit_files(project, entries, {".json"}):
+        try:
+            value = json.loads(read_text(path))
+        except (OSError, json.JSONDecodeError):
+            continue
+        snapshots[path.stem.lower()] = {
+            "file": normalize_relative(path, project),
+            "paths": json_shape_paths(value),
+            "constants": json_shape_constants(value),
+        }
+    return snapshots
 
 
 def extract_contracts_from_code_text(file: str, text: str, source: str) -> list[dict]:
@@ -1334,6 +1419,7 @@ def semantic_changes_to_findings(changes: list[dict]) -> list[Finding]:
             line=int(change.get("line", 1)),
             snippet=change.get("symbol", "")[:240],
             message=change.get("message", "发现业务语义变化。"),
+            source="semantic-diff",
         )
         for change in changes
     ]
@@ -1350,6 +1436,7 @@ def contract_violations_to_findings(violations: list[dict]) -> list[Finding]:
             line=int(violation.get("line", 1)),
             snippet=violation.get("actual", "")[:240],
             message=violation.get("message", "发现业务契约违反。"),
+            source="business-contract",
         )
         for violation in violations
     ]
@@ -1453,6 +1540,8 @@ def make_report(data: dict) -> str:
     findings = [Finding(**item) for item in data["findings"]]
     sorted_findings = sorted(findings, key=lambda item: (severity_rank(item.severity), item.file, item.line))
     summary = data["summary"]
+    suppressed_findings = data.get("suppressed_findings", [])
+    suppression_summary = data.get("suppression_summary", {})
     changes = data["changes"]
     audit_plan = data.get("audit_plan", {})
     audit_plan_summary = (
@@ -1474,6 +1563,7 @@ def make_report(data: dict) -> str:
         f"- 候选业务契约数：{len(data.get('contract_candidates', []))}",
         f"- 启用业务契约数：{len(data.get('business_contracts', []))}",
         f"- 风险命中数：{len(findings)}",
+        f"- 已抑制文本线索数：{len(suppressed_findings)}",
         "",
         "## 总览",
         "",
@@ -1486,6 +1576,14 @@ def make_report(data: dict) -> str:
             lines.append(f"- `{severity}`：{count}")
     else:
         lines.append("- 未发现内置风险命中。")
+
+    lines.extend(["", "### 已抑制文本线索", ""])
+    if suppressed_findings:
+        for reason, count in suppression_summary.get("by_reason", {}).items():
+            lines.append(f"- `{reason}`：{count}")
+        lines.append("- 完整线索保留在 JSON 证据包的 `suppressed_findings` 中。")
+    else:
+        lines.append("- 无。")
 
     lines.extend(["", "### 按风险类型", ""])
     if summary["by_category"]:
@@ -1569,8 +1667,19 @@ def make_report(data: dict) -> str:
     lines.extend(["", "## 业务契约执行结果", ""])
     lines.append(f"- 状态：`{contract_check.get('status', 'disabled')}`")
     lines.append(f"- 说明：{contract_check.get('message', '')}")
+    lines.append(f"- 启用契约总数：{contract_check.get('total_contracts', 0)}")
     lines.append(f"- 检查契约数：{contract_check.get('checked_contracts', 0)}")
+    lines.append(f"- 未检查契约数：{len(contract_check.get('unchecked_contracts', []))}")
     lines.append(f"- 违反契约数：{len(violations)}")
+    unchecked_contracts = contract_check.get("unchecked_contracts", [])
+    if unchecked_contracts:
+        lines.append("")
+        lines.append("未检查契约：")
+        for item in unchecked_contracts[:100]:
+            lines.append(
+                f"- `{item.get('contract_id', '')}` `{item.get('kind', '')}` "
+                f"`{item.get('file', '')}:{item.get('line', 1)}` {item.get('reason', '')}"
+            )
     if violations:
         for violation in violations[:100]:
             contract = violation.get("contract", {})
@@ -1581,6 +1690,24 @@ def make_report(data: dict) -> str:
             )
     else:
         lines.append("- 未发现当前规则支持的契约违反。")
+
+    differences = contract_check.get("differences", [])
+    lines.extend(["", "### 结构化差异", ""])
+    if differences:
+        for difference in differences[:100]:
+            changed = difference.get("changed", [])
+            changed_text = "；变化：" + ", ".join(
+                f"{item.get('path', '')}={item.get('actual', '')}（期望 {item.get('expected', '')}）"
+                for item in changed
+            ) if changed else ""
+            lines.append(
+                f"- `{difference.get('kind', '')}` `{difference.get('file', '')}:{difference.get('line', 1)}` "
+                f"缺失：`{', '.join(str(item) for item in difference.get('missing', [])) or '无'}`；"
+                f"新增：`{', '.join(str(item) for item in difference.get('added', [])) or '无'}`"
+                f"{changed_text}"
+            )
+    else:
+        lines.append("- 未生成结构化差异。")
 
     codeql = data.get("codeql", disabled_codeql_result())
     lines.extend(["", "## CodeQL 深度分析", ""])
@@ -1770,6 +1897,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--codeql-cache", help="指定 CodeQL database 缓存目录")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
+    parser.add_argument("--include-support-findings", action="store_true", help="把测试、文档、调试和 fixture 文本命中纳入正式风险")
+    parser.add_argument("--response-snapshot", action="append", default=[], help="用于 JSON 契约结构化对比的实际响应快照，可重复传入")
     parser.add_argument("--print-context", action="store_true", help="输出项目版本控制上下文后退出，供 AI 适配器预检")
     parser.add_argument("--audit-plan", help="从已确认的审计计划 JSON 执行")
     parser.add_argument("--save-audit-plan", help="把当前显式参数保存为审计计划 JSON 后退出")
@@ -1911,17 +2040,28 @@ def main(argv: list[str]) -> int:
         target_inventory = codeql_target_inventory(codeql) if codeql_enabled else None
         if target_inventory is None:
             target_inventory = extract_semantic_inventory(project)
-    business_contract_check = evaluate_contracts(business_contracts, target_inventory)
+    response_snapshots = load_response_snapshots(project, args.response_snapshot)
+    business_contract_check = evaluate_contracts(
+        business_contracts,
+        target_inventory,
+        response_snapshots,
+    )
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
     findings.extend(contract_violations_to_findings(business_contract_check.get("violations", [])))
     if codeql_enabled:
-        findings.extend(Finding(**item) for item in codeql.get("findings", []))
+        findings.extend(Finding(**{**item, "source": "codeql"}) for item in codeql.get("findings", []))
         findings.extend(
             semantic_changes_to_findings(
                 codeql.get("comparison", {}).get("semantic", {}).get("changes", [])
             )
         )
 
+    raw_finding_data = [dataclasses.asdict(finding) for finding in findings]
+    active_finding_data, suppressed_findings = partition_findings(
+        raw_finding_data,
+        include_support=args.include_support_findings,
+    )
+    findings = [Finding(**item) for item in active_finding_data]
     effective_audit_plan = dict(loaded_audit_plan) if loaded_audit_plan else build_audit_plan(args)
     data = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -1938,9 +2078,12 @@ def main(argv: list[str]) -> int:
         "contract_source": contract_source,
         "contract_candidates": contract_candidates,
         "business_contracts": business_contracts,
+        "response_snapshots": response_snapshots,
         "business_contract_check": business_contract_check,
         "codeql": codeql,
-        "findings": [dataclasses.asdict(finding) for finding in findings],
+        "findings": active_finding_data,
+        "suppressed_findings": suppressed_findings,
+        "suppression_summary": summarize_suppressed(suppressed_findings),
         "summary": summarize_findings(findings),
         "mermaid": build_mermaid(findings),
     }
@@ -1957,6 +2100,10 @@ def main(argv: list[str]) -> int:
         print(f"风险命中数：{len(findings)}")
     else:
         print("未发现内置风险命中。")
+    if suppressed_findings:
+        print(f"已抑制文本线索数：{len(suppressed_findings)}，完整证据已写入 JSON。")
+    if business_contract_check.get("unchecked_contracts"):
+        print(f"未检查业务契约数：{len(business_contract_check['unchecked_contracts'])}。")
     print(f"CodeQL 状态：{codeql['status']}，{codeql['message']}")
     if args.require_codeql and codeql["status"] != "success":
         print("CodeQL 是本次检查的必需项，但未成功完成。", file=sys.stderr)

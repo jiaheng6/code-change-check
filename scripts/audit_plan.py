@@ -38,6 +38,8 @@ AUDIT_PLAN_FIELDS = [
     "codeql_cache",
     "output",
     "scan_all",
+    "include_support_findings",
+    "response_snapshot",
 ]
 
 
@@ -68,6 +70,7 @@ def build_audit_plan(args: argparse.Namespace) -> dict:
     plan["baseline"] = resolve_path(args.baseline)
     plan["spec"] = resolve_path_list(args.spec, project)
     plan["contract"] = resolve_path_list(args.contract, project)
+    plan["response_snapshot"] = resolve_path_list(args.response_snapshot, project)
     plan["rules"] = resolve_path(args.rules)
     plan["output"] = resolve_path(args.output)
     plan["codeql_cache"] = resolve_path(args.codeql_cache, project)

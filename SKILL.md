@@ -23,7 +23,8 @@ path/to/code-change-check/run-code-change-check.cmd --project . --print-context
 2. 如果检测到当前目录是 Git 工作树子目录，也必须询问审计当前子目录还是 Git 工作树根目录。
 3. 如果没有显式范围，必须询问本次迭代范围：选择哪些 Git 提交、哪些 SVN revision、工作副本未提交改动，或全量扫描。
 4. 必须询问业务契约来源：指定契约文件、从迭代前旧代码提取、两者都用或不使用。
-5. 必须询问是否启用 CodeQL；如果用户启用但本机未安装 CodeQL CLI，必须询问是否需要安装说明，不能把 CodeQL 缺失解释为检查通过。
+5. 如果用户指定 JSON 响应契约，必须询问是否有同文件名的实际响应快照。没有快照时，必须把 JSON 契约报告为未检查，不能把“0 违反”解释为通过。
+6. 必须询问是否启用 CodeQL；如果用户启用但本机未安装 CodeQL CLI，必须询问是否需要安装说明，不能把 CodeQL 缺失解释为检查通过。
 
 Claude Code、Cline 或其他无 TTY 环境确认完毕后，禁止直接执行最终审计。必须把用户选择编译成审计计划，展示计划内容，得到用户确认后再执行：
 
@@ -50,10 +51,11 @@ path/to/code-change-check/run-code-change-check.cmd --audit-plan code-change-che
 4. 收集需求证据：读取 OpenSpec、spec-kit、superpowers、Markdown 需求、任务列表和用户补充说明。
 5. 确认业务契约来源：使用指定契约文件、从迭代前旧代码提取、两者都用或不使用。
 6. 让用户确认从旧代码和契约文件中提取出的候选契约，避免把历史坏代码直接当标准。
-7. 执行业务契约检查：将已启用契约和 target 语义清单对比，首批覆盖寻址、调用参数、租户字段和状态字段。
+7. 执行业务契约检查：将已启用契约和 target 语义清单对比，覆盖寻址、调用参数、租户字段、状态字段；JSON 契约只有在提供同文件名的 `--response-snapshot` 时才执行字段路径对比。
 8. 运行 `scripts/code_change_check.py` 生成审计证据包和 Markdown 报告。
-9. 基于报告继续人工推理，重点解释高风险位置，不要只复述扫描结果。
-10. 输出结论时必须包含文件、行号、风险原因和建议验证方式。
+9. 优先阅读正式风险；测试、文档、调试日志、fixture、契约/响应 JSON 和 XML namespace 的文本正则命中默认只作为已抑制线索，除非用户明确要求 `--include-support-findings`。
+10. 基于报告继续人工推理，重点解释高风险位置，不要只复述扫描结果。
+11. 输出结论时必须包含文件、行号、风险原因和建议验证方式。
 
 ## 推荐命令
 
@@ -129,6 +131,12 @@ CodeQL database 默认缓存到目标项目的 `.code-change-check/cache/codeql/
 
 ```bash
 path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/contracts.md --contract-source file --output code-change-check-output
+```
+
+使用同名实际响应快照执行 JSON 字段路径对比：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/contracts/safetyInspection.json --strict-contract --contract-source file --response-snapshot responses/safetyInspection.json --output code-change-check-output
 ```
 
 从迭代前旧代码提取候选契约：

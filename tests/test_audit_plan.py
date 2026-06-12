@@ -28,9 +28,12 @@ class AuditPlanTest(unittest.TestCase):
             project = root / "backend"
             spec_dir = root / "openspec" / "changes" / "selected"
             contract_dir = root / "docs" / "contracts"
+            response = root / "responses" / "actual.json"
             project.mkdir()
             spec_dir.mkdir(parents=True)
             contract_dir.mkdir(parents=True)
+            response.parent.mkdir(parents=True)
+            response.write_text('{"ok": true}\n', encoding="utf-8")
             args = self.tool.parse_args(
                 [
                     "--project",
@@ -41,6 +44,9 @@ class AuditPlanTest(unittest.TestCase):
                     "--contract",
                     str(contract_dir),
                     "--strict-contract",
+                    "--response-snapshot",
+                    str(response),
+                    "--include-support-findings",
                     "--contract-source",
                     "file",
                     "--scan-all",
@@ -63,6 +69,8 @@ class AuditPlanTest(unittest.TestCase):
         self.assertTrue(loaded_args.strict_spec)
         self.assertEqual(loaded_args.contract, [str(contract_dir.resolve())])
         self.assertTrue(loaded_args.strict_contract)
+        self.assertEqual(loaded_args.response_snapshot, [str(response.resolve())])
+        self.assertTrue(loaded_args.include_support_findings)
         self.assertEqual(loaded_args.contract_source, "file")
         self.assertTrue(loaded_args.scan_all)
         self.assertTrue(loaded_args.codeql)

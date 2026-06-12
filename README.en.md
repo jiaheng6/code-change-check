@@ -23,6 +23,8 @@ Typical problems include:
 - Maps requirements to commits and exposes commits without requirement sources, plus requirements without commits.
 - Extracts candidate business contracts from explicit contract files or pre-iteration code.
 - Executes business contract checks. The first supported contract types cover addressing, call arguments, tenant fields, and state fields.
+- Extracts JSON response contract paths and compares them with explicit response snapshots.
+- Moves text matches from tests, docs, debug logs, fixtures, and XML namespaces into a suppressed evidence section by default.
 - Compares lightweight semantic inventories, so some business semantic changes can still be detected when CodeQL is unavailable.
 - Optionally runs CodeQL baseline/target comparison and classifies CodeQL findings as new, existing, or resolved.
 - Outputs a JSON evidence bundle and a Markdown audit report.
@@ -230,6 +232,24 @@ path/to/code-change-check/run-code-change-check.cmd --project . --spec docs/spec
 path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/contracts.md --contract-source file --output code-change-check-output
 ```
 
+### Compare A JSON Contract With An Actual Response Snapshot
+
+Use the same filename for the expected contract and actual response. The comparison checks field paths and stable, unique `label` strings:
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/api-contracts/safetyInspection.json --strict-contract --contract-source file --response-snapshot responses/safetyInspection.json --output code-change-check-output
+```
+
+Without a matching response snapshot, the JSON contract is reported as unchecked instead of implying that zero violations means it passed.
+
+### Include Support-File Text Findings
+
+Text-rule matches from tests, docs, debug logs, fixtures, contract/response JSON, and XML namespaces remain in `suppressed_findings` by default. Include them in primary findings with:
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --scan-all --include-support-findings --output code-change-check-output
+```
+
 ### Extract Candidate Contracts From Pre-Iteration Code
 
 ```bash
@@ -274,8 +294,11 @@ Currently executable contract types:
 - `tenant`: checks tenant field clues such as `tenantId` and `tenant_id`.
 - `state`: checks state field clues such as `status` and `state`.
 - `text-rule`: executes text rules that can be parsed into the supported categories above. Other text rules remain manual review clues.
+- `json-shape`: extracts JSON field paths and stable `label` strings, then checks missing paths and label changes when a same-name `--response-snapshot` is supplied.
 
 Contracts extracted from old code are only candidate standards. In interactive mode, confirm the candidates before using them, so historical bad code does not become the rule by accident.
+
+The report separates total contracts, checked contracts, unchecked contracts, and structured differences. Unchecked contracts are not counted as passed.
 
 ## CodeQL Analysis
 
@@ -303,6 +326,8 @@ The Markdown report includes:
 - Selected iteration commits.
 - Requirement-to-commit mapping.
 - Business contract source, enabled contracts, and execution results.
+- Unchecked contracts and structured contract differences.
+- Primary findings and suppressed text evidence statistics.
 - CodeQL status and baseline/target comparison.
 - Business semantic differences.
 - Priority manual reading list.
@@ -336,7 +361,7 @@ python -m unittest discover -s tests -p "test_*.py"
 Compile scripts:
 
 ```bash
-python -m py_compile scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
+python -m py_compile scripts/audit_plan.py scripts/finding_filter.py scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
 ```
 
 Validate the Skill:

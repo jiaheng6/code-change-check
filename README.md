@@ -23,6 +23,8 @@
 - 支持需求和提交映射，暴露无需求来源的提交、无提交落地的需求。
 - 支持从契约文件或迭代前旧代码提取候选业务契约。
 - 支持业务契约执行检查，首批覆盖寻址、调用参数、租户字段和状态字段。
+- 支持 JSON 响应契约字段路径提取，并通过实际响应快照执行结构化差异检查。
+- 默认把测试、文档、调试日志、fixture 和 XML namespace 文本命中移入已抑制线索区，避免淹没生产风险。
 - 支持轻量语义清单对比，CodeQL 不可用时也能发现一部分业务语义变化。
 - 支持可选 CodeQL baseline/target 对比，区分新增、已有和已消失的 CodeQL 命中。
 - 输出 JSON 证据包和 Markdown 审计报告。
@@ -228,6 +230,24 @@ path/to/code-change-check/run-code-change-check.cmd --project . --spec docs/spec
 path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/contracts.md --contract-source file --output code-change-check-output
 ```
 
+### 对比 JSON 响应契约和实际响应快照
+
+契约 JSON 和实际响应 JSON 使用相同文件名时，可以逐字段路径对比，并检查稳定且唯一的 `label` 文案是否变化：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/api-contracts/safetyInspection.json --strict-contract --contract-source file --response-snapshot responses/safetyInspection.json --output code-change-check-output
+```
+
+没有传入匹配的实际响应快照时，JSON 契约会显示在“未检查契约”中，不会用“0 违反”暗示已经通过。
+
+### 查看全部支持文件文本线索
+
+测试、文档、调试日志、fixture、契约/响应 JSON 和 XML namespace 的文本正则命中默认保留在 `suppressed_findings`，但不进入正式风险。需要全部纳入正式风险时使用：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --scan-all --include-support-findings --output code-change-check-output
+```
+
 ### 从迭代前旧代码提取候选契约
 
 ```bash
@@ -272,8 +292,11 @@ path/to/code-change-check/run-code-change-check.cmd --project . --require-codeql
 - `tenant`：检查 `tenantId`、`tenant_id` 等租户字段线索。
 - `state`：检查 `status`、`state` 等状态字段线索。
 - `text-rule`：对能解析为上述类型的文本规则执行检查，其余保留为人工复核线索。
+- `json-shape`：从 JSON 契约提取字段路径和稳定 `label` 文案；提供同文件名的 `--response-snapshot` 后，检查实际响应缺失字段和标签值变化。
 
 旧代码提取出的契约只是候选标准。交互模式下建议人工确认后再启用，避免把历史坏代码固化为规则。
+
+报告会分别显示启用契约总数、实际检查契约数、未检查契约数和结构化差异。未检查契约不计为通过。
 
 ## CodeQL 分析
 
@@ -301,6 +324,8 @@ Markdown 报告包含：
 - 本次迭代提交记录。
 - 需求-提交映射。
 - 业务契约来源、启用契约和执行结果。
+- 未检查契约和结构化契约差异。
+- 正式风险与已抑制文本线索统计。
 - CodeQL 状态和 baseline/target 对比。
 - 业务语义差异。
 - 人工优先阅读清单。
@@ -334,7 +359,7 @@ python -m unittest discover -s tests -p "test_*.py"
 编译检查：
 
 ```bash
-python -m py_compile scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
+python -m py_compile scripts/audit_plan.py scripts/finding_filter.py scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
 ```
 
 Skill 校验：

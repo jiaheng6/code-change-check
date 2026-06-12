@@ -270,6 +270,40 @@ class ContractTest(unittest.TestCase):
 
         self.assertEqual([path.name for path in files], ["api.json"])
 
+    def test_extract_json_contract_builds_structured_shape_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            contract = project / "safetyInspection.json"
+            contract.write_text(
+                '{"data":{"event":{"handleRate":{"label":"事件处置率","value":"80%"}},"list":[{"id":1,"name":"A"}]}}',
+                encoding="utf-8",
+            )
+
+            contracts = self.tool.extract_contracts_from_files(project, [contract])
+
+        self.assertEqual(len(contracts), 1)
+        self.assertEqual(contracts[0]["kind"], "json-shape")
+        self.assertEqual(contracts[0]["match_key"], "safetyinspection")
+        self.assertIn("data.event.handleRate.label", contracts[0]["shape"]["paths"])
+        self.assertEqual(
+            contracts[0]["shape"]["constants"]["data.event.handleRate.label"],
+            "事件处置率",
+        )
+        self.assertIn("data.list[]", contracts[0]["shape"]["paths"])
+        self.assertIn("data.list[].name", contracts[0]["shape"]["paths"])
+
+    def test_load_response_snapshots_indexes_json_shapes_by_file_stem(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            response = project / "responses" / "safetyInspection.json"
+            response.parent.mkdir()
+            response.write_text('{"data":{"event":{}}}\n', encoding="utf-8")
+
+            snapshots = self.tool.load_response_snapshots(project, [str(response)])
+
+        self.assertIn("safetyinspection", snapshots)
+        self.assertIn("data.event", snapshots["safetyinspection"]["paths"])
+
 
 if __name__ == "__main__":
     unittest.main()

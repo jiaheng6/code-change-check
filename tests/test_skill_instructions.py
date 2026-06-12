@@ -19,6 +19,8 @@ class SkillInstructionsTest(unittest.TestCase):
         self.assertIn("--confirm-audit-plan", content)
         self.assertIn("--audit-plan", content)
         self.assertIn("--strict-spec", content)
+        self.assertIn("--response-snapshot", content)
+        self.assertIn("--include-support-findings", content)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,16 @@
 - `tenant`：旧代码或显式规则中的租户字段线索需要在 target 中保留。
 - `state`：旧代码或显式规则中的状态字段线索需要在 target 中保留。
 - `text-rule`：目前只执行能解析为寻址、调用形态、租户字段或状态字段的文本规则，其余文本规则仍作为人工复核线索。
+- `json-shape`：从 JSON 契约递归提取字段路径和稳定且唯一的 `label` 文案；只有提供同文件名的 `--response-snapshot` 时才执行实际响应形状与标签值对比。动态数值不做常量比较，避免误报。
+
+契约执行结果必须区分：
+
+- `total_contracts`：启用契约总数。
+- `checked_contracts`：实际执行过自动检查的契约数。
+- `unchecked_contracts`：缺少响应快照或无法解析为可执行结构的契约。
+- `differences`：机器可读的期望、实际、缺失和新增项。
+
+`unchecked_contracts` 不得解释为检查通过。JSON 契约没有匹配响应快照时，即使 `violations` 为 0，也只能说明尚未执行字段形状对比。
 
 ## 使用原则
 

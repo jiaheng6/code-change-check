@@ -19,6 +19,8 @@
 - 用户只选择部分 OpenSpec、需求或任务目录时，使用 `--strict-spec`。
 - 用户只选择部分契约文件或目录时，使用 `--strict-contract`。
 - `--spec` 和 `--contract` 支持文件或目录；目录会递归读取支持的文件。
+- JSON 契约需要实际响应验证时，把同文件名响应通过 `--response-snapshot` 写入计划。
+- `--include-support-findings` 会把测试、文档、调试、fixture 和 XML namespace 文本线索重新纳入正式风险，必须由用户明确选择。
 - 需求或契约位于代码目录之外时，可以传绝对路径，或传相对于 `project` 的路径。
 - `svn-incompatible` 不能自动降级。只有用户明确选择目录快照时才使用 `--scan-all`，或提供 `--baseline`。
 
