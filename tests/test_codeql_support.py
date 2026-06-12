@@ -82,6 +82,125 @@ class CodeQLSupportTest(unittest.TestCase):
 
         self.assertEqual(mode, "autobuild")
 
+    def test_detect_java_build_strategy_overrides_none_and_builds_multi_module_maven_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            module = root / "service"
+            module.mkdir()
+            (root / "pom.xml").write_text(
+                "<project><modules><module>service</module></modules></project>\n",
+                encoding="utf-8",
+            )
+            (module / "pom.xml").write_text("<project />\n", encoding="utf-8")
+            (module / "App.java").write_text("class App {}\n", encoding="utf-8")
+
+            strategy = self.codeql.detect_build_strategy(module, "java-kotlin", "none", None)
+
+        self.assertEqual(strategy["effective_build_mode"], "autobuild")
+        self.assertEqual(strategy["adjustment"], "java-build-mode-none-overridden")
+        self.assertEqual(strategy["build_system"], "maven")
+        self.assertIn("-pl service -am", strategy["retry_command"])
+        self.assertIn("-DskipTests compile", strategy["retry_command"])
+
+    def test_detect_java_build_strategy_finds_nested_maven_project_from_repository_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            backend = project / "backend"
+            backend.mkdir()
+            (backend / "pom.xml").write_text("<project />\n", encoding="utf-8")
+            (backend / "App.java").write_text("class App {}\n", encoding="utf-8")
+
+            strategy = self.codeql.detect_build_strategy(project, "java-kotlin", None, None)
+
+        self.assertEqual(strategy["build_system"], "maven")
+        self.assertEqual(Path(strategy["build_root"]), backend.resolve())
+        self.assertIn("-f", strategy["retry_command"])
+        self.assertIn(str((backend / "pom.xml").resolve()), strategy["retry_command"])
+
+    def test_classify_codeql_build_failure_recognizes_dependency_resolution(self):
+        result = self.codeql.classify_build_failure(
+            "[ERROR] Could not resolve dependencies for project demo:service"
+        )
+
+        self.assertEqual(result["category"], "dependency-resolution")
+        self.assertIn("依赖", result["message"])
+
+    def test_detect_build_environment_reports_java_and_maven_status(self):
+        def fake_runner(args, cwd):
+            if args[0] == "java":
+                return 0, 'openjdk version "17.0.12"'
+            if args[0] == "mvn":
+                return 0, "Apache Maven 3.9.9"
+            return 127, "命令不存在"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            (project / "pom.xml").write_text("<project />\n", encoding="utf-8")
+
+            environment = self.codeql.detect_build_environment(
+                project,
+                "java-kotlin",
+                "maven",
+                command_runner=fake_runner,
+            )
+
+        self.assertTrue(environment["jdk"]["available"])
+        self.assertTrue(environment["build_tool"]["available"])
+        self.assertIn("Apache Maven", environment["build_tool"]["detail"])
+
+    def test_run_codeql_analysis_retries_failed_java_autobuild_with_maven_command(self):
+        create_commands = []
+
+        def fake_runner(args, cwd):
+            if args[1] == "version":
+                return 0, "CodeQL command-line toolchain release 2.20.0"
+            if args[1:3] == ["resolve", "languages"]:
+                return 0, "java-kotlin"
+            if args[0] == "java":
+                return 0, 'openjdk version "17.0.12"'
+            if args[0] == "mvn":
+                return 0, "Apache Maven 3.9.9"
+            if args[1:3] == ["database", "create"]:
+                create_commands.append(args)
+                database = Path(args[3])
+                database.mkdir(parents=True)
+                if any(item == "--build-mode=autobuild" for item in args):
+                    return 1, "[ERROR] Failed to execute goal compiler:compile"
+                if any(item.startswith("--command=") and "mvn" in item for item in args):
+                    return 0, "数据库创建完成"
+            if args[1:3] == ["database", "analyze"]:
+                output_arg = next(item for item in args if item.startswith("--output="))
+                output = Path(output_arg.split("=", 1)[1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(
+                    json.dumps({"version": "2.1.0", "runs": [{"tool": {"driver": {}}, "results": []}]}),
+                    encoding="utf-8",
+                )
+                return 0, "分析完成"
+            return 1, "未知命令"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            project.mkdir()
+            (project / "pom.xml").write_text("<project />\n", encoding="utf-8")
+            (project / "App.java").write_text("class App {}\n", encoding="utf-8")
+
+            result = self.codeql.run_codeql_analysis(
+                project,
+                root / "output",
+                cache_root=root / "cache",
+                command_runner=fake_runner,
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(create_commands), 2)
+        database = result["databases"][0]
+        self.assertEqual(database["recovery_status"], "success")
+        self.assertEqual(database["build_command"], "mvn -DskipTests compile")
+        self.assertEqual([item["status"] for item in database["attempts"]], ["failed", "success"])
+        self.assertEqual(database["attempts"][0]["failure"]["category"], "compilation-failed")
+
     def test_run_codeql_analysis_reuses_successful_database_cache(self):
         commands = []
 

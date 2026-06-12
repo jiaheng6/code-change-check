@@ -22,6 +22,9 @@
 - `manual_review_obligations`：由未检查契约生成的人工核验任务及候选代码位置。
 - `audit_coverage`：自动契约覆盖率、覆盖质量状态和阻断/限制原因。
 - `codeql`：target CodeQL 启用状态、CLI 状态、分析范围、语言、数据库、SARIF 文件和原始 CodeQL 命中。
+- `codeql.databases[].environment`：Java 建库使用的 JDK 和 Maven/Gradle 环境诊断。
+- `codeql.databases[].attempts`：每次 database 创建尝试、构建模式、命令、状态和失败分类。
+- `codeql.databases[].recovery_status`：自动构建恢复状态，例如 `not-needed`、`success`、`failed` 或 `cache-reused`。
 - `codeql.comparison`：baseline/target 来源、两端状态、新增命中、已有命中、已消失命中和 baseline 分析证据。
 - `codeql.comparison.semantic`：baseline/target 语义清单、语义对比状态，以及调用参数、寻址、租户字段和状态字段变化。
 - `findings`：风险命中列表。
@@ -40,7 +43,7 @@
 - 需求-提交映射。
 - 业务契约来源、候选契约数、启用契约和业务契约执行结果。
 - 审计覆盖质量闸门、输入角色冲突、缺失引用契约材料和必须人工核验的未检查契约。
-- CodeQL 状态、分析范围、语言、数据库缓存状态、两端对比状态、差异命中数和业务语义差异。
+- CodeQL 状态、分析范围、语言、数据库缓存状态、构建环境诊断、自动重试过程、最终失败分类、两端对比状态、差异命中数和业务语义差异。
 - 需求和任务线索。
 - Mermaid 风险图。
 - 人工优先阅读清单。

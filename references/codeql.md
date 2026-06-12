@@ -10,6 +10,10 @@
 - 可靠构造 baseline/target 源代码，为每种语言创建独立 database，执行标准 code-scanning query suite。
 - 将 SARIF 结果转换为统一风险项，并合并到 JSON 证据包和 Markdown 报告。
 - Maven/Gradle Java、Kotlin、Go 或 Swift 默认使用 `autobuild`；没有构建文件的纯 Java、JavaScript/TypeScript、Python 等默认使用 `none`。
+- Maven/Gradle Java 项目即使被错误指定为 `none`，也会调整为 `autobuild`，避免在没有观察编译过程的情况下创建无效 database。
+- Java 建库前会检测 JDK 和 Maven/Gradle；`autobuild` 失败后会清理不完整 database，并使用检测出的 Maven/Gradle 编译命令自动重试一次。
+- 审计目录是 SVN/Git 根目录、而 Java 工程位于 `backend/` 等子目录时，会继续向下发现嵌套 Maven/Gradle 构建根目录。
+- 构建诊断、每次建库尝试、最终构建命令、恢复状态和失败分类都会写入证据包及 Markdown 报告。
 - 将 CodeQL 命中分为新增、已有和已消失。只有两端分析都成功时才生成差异分类。
 - 对 baseline/target 提取并比较业务语义清单，当前覆盖调用参数、内部/外部寻址、租户字段和状态字段。
 - 轻量语义提取器作为降级基础；CodeQL 可用时，运行仓库内置自定义查询补充 Java/Kotlin 和 JavaScript/TypeScript 调用清单。
@@ -83,6 +87,10 @@ run-code-change-check.cmd --project . --codeql --codeql-language javascript --ou
 ```bash
 run-code-change-check.cmd --project . --codeql --codeql-language java --codeql-build-command "mvn -DskipTests package" --output code-change-check-output
 ```
+
+显式指定的 `--codeql-build-command` 优先级最高，工具不会替换该命令，也不会在失败后擅自改用其他命令。未指定命令时，Maven 项目自动重试命令为 `mvn -DskipTests compile`；多模块项目会增加 `-f`、`-pl` 和 `-am`。Gradle 项目会使用 `classes -x test` 或对应模块任务。
+
+自动重试只执行一次。JDK 缺失、构建工具缺失、依赖解析失败、项目编译失败或构建过程未观察到源代码时，报告会保留对应失败分类，CodeQL 状态仍为失败，而不是把零命中解释为通过。
 
 ## 状态
 

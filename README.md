@@ -363,8 +363,10 @@ CodeQL 是可选能力。
 启用后会尝试：
 
 - 检测 CodeQL CLI 和可用语言。
+- 对 Java 项目检测 JDK 和 Maven/Gradle 构建环境，包括 SVN/Git 根目录下的嵌套后端工程。
 - 构造 baseline/target 源代码。
 - 创建或复用 CodeQL database。
+- Maven/Gradle Java 项目会阻止错误的 `none` 模式；`autobuild` 失败后安全清理残留 database，并使用检测出的构建命令自动重试一次。
 - 执行标准 code-scanning query suite。
 - 运行内置自定义语义查询。
 - 将命中分为新增、已有和已消失。
@@ -372,6 +374,8 @@ CodeQL 是可选能力。
 如果没有安装 CodeQL CLI，工具不会把它解释为“通过”，而是在报告中明确标记 `unavailable`，并继续执行其他检查。
 
 交互模式下，如果用户选择启用 CodeQL 但本地没有安装 CodeQL CLI，工具会提示是否查看安装方式，并给出官方安装文档链接。安装后请确认 `codeql version` 可执行，再重新运行检查。
+
+自动重试最多执行一次，且不会替换用户显式传入的 `--codeql-build-command`。Markdown 报告的“CodeQL 构建诊断与重试”会展示 JDK、构建工具、每次建库尝试、最终构建命令和失败分类。依赖解析或项目本身编译失败时，CodeQL 仍会明确标记失败，不会把零命中当作通过。
 
 ## 报告重点
 

@@ -51,7 +51,7 @@ path/to/code-change-check/run-code-change-check.cmd --audit-plan code-change-che
 
 1. 明确检查范围：确认项目根目录、需求/设计/任务文档位置、版本来源和用户特别关注的风险。
 2. 收集变更证据：优先识别 Git，其次 SVN；没有版本管理时使用目录快照或全量扫描。
-3. 确认是否启用 CodeQL。启用后检测 CLI、语言和缓存，构造可靠的 baseline/target 源代码，分别创建或复用 database，并对比调用参数、寻址、租户字段和状态字段等业务语义线索。
+3. 确认是否启用 CodeQL。启用后检测 CLI、语言、JDK、Maven/Gradle 和缓存，构造可靠的 baseline/target 源代码，分别创建或复用 database，并对比调用参数、寻址、租户字段和状态字段等业务语义线索。Maven/Gradle Java 项目会把错误的 `none` 调整为 `autobuild`；如果 `autobuild` 建库失败，会安全清理残留 database，并使用检测出的 Maven/Gradle 构建命令自动重试一次。报告必须检查构建诊断、重试状态和最终失败分类，不能只看 CodeQL 命中数。
 4. 收集需求证据：读取 OpenSpec、spec-kit、superpowers、Markdown 需求、任务列表和用户补充说明。
 5. 确认业务契约来源：使用指定契约文件、从迭代前旧代码提取、两者都用或不使用。
 6. 让用户确认从旧代码和契约文件中提取出的候选契约，避免把历史坏代码直接当标准。
@@ -129,7 +129,7 @@ path/to/code-change-check/run-code-change-check.cmd --project . --codeql --outpu
 path/to/code-change-check/run-code-change-check.cmd --project . --require-codeql --output code-change-check-output
 ```
 
-CodeQL database 默认缓存到目标项目的 `.code-change-check/cache/codeql/`。默认尝试 baseline/target 对比；需要关闭时使用 `--no-codeql-compare`，要求对比必须成功时使用 `--require-codeql-compare`。启用 CodeQL 后，即使本地没有 CodeQL CLI，仍会运行轻量语义清单对比；CodeQL 可用时会用自定义查询补充调用清单。详细规则见 `references/codeql.md`。
+CodeQL database 默认缓存到目标项目的 `.code-change-check/cache/codeql/`。默认尝试 baseline/target 对比；需要关闭时使用 `--no-codeql-compare`，要求对比必须成功时使用 `--require-codeql-compare`。启用 CodeQL 后，即使本地没有 CodeQL CLI，仍会运行轻量语义清单对比；CodeQL 可用时会用自定义查询补充调用清单。Java 项目的自动构建重试最多执行一次，用户显式传入的 `--codeql-build-command` 不会被替换。详细规则见 `references/codeql.md`。
 
 交互模式启用 CodeQL 但未检测到 CodeQL CLI 时，工具会询问是否查看安装方式，并给出 GitHub 官方 CodeQL CLI 安装文档链接。
 

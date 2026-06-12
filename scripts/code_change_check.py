@@ -1797,8 +1797,52 @@ def make_report(data: dict) -> str:
                 f"- `{database.get('language', '')}` 构建模式 `{database.get('build_mode', '')}` "
                 f"缓存 `{database.get('cache_status', '')}` 路径 `{database.get('path', '')}`"
             )
+            if database.get("build_command"):
+                lines.append(f"  - 实际构建命令：`{database['build_command']}`")
+            if database.get("recovery_status"):
+                lines.append(f"  - 构建恢复状态：`{database['recovery_status']}`")
             if database.get("message"):
                 lines.append(f"  - 错误：{database['message'][:500]}")
+        lines.extend(["", "### CodeQL 构建诊断与重试", ""])
+        for database in codeql["databases"]:
+            lines.append(f"#### `{database.get('language', '')}`")
+            lines.append("")
+            lines.append(f"- 构建系统：`{database.get('build_system', '') or '未检测到'}`")
+            lines.append(f"- 构建模式：`{database.get('build_mode', '') or '未知'}`")
+            lines.append(f"- 恢复状态：`{database.get('recovery_status', '') or '未记录'}`")
+            if database.get("strategy_adjustment"):
+                lines.append(f"- 策略调整：`{database['strategy_adjustment']}`")
+            if database.get("build_command"):
+                lines.append(f"- 最终构建命令：`{database['build_command']}`")
+            environment = database.get("environment", {})
+            for label, key in [("JDK", "jdk"), ("构建工具", "build_tool")]:
+                item = environment.get(key, {})
+                detail = str(item.get("detail", "")).replace("\r", " ").replace("\n", " / ")
+                lines.append(
+                    f"- {label}：`{'可用' if item.get('available') else '不可用'}`"
+                    f"{f'；{detail[:500]}' if detail else ''}"
+                )
+            attempts = database.get("attempts", [])
+            if attempts:
+                lines.append("- 建库尝试：")
+                for index, attempt in enumerate(attempts, start=1):
+                    failure = attempt.get("failure", {})
+                    command = attempt.get("command", "")
+                    command_text = f"；命令 `{command}`" if command else ""
+                    failure_text = (
+                        f"；失败分类 `{failure.get('category', '')}`"
+                        if failure
+                        else ""
+                    )
+                    lines.append(
+                        f"  - 第 {index} 次 `{attempt.get('name', '')}`：`{attempt.get('status', '')}`"
+                        f"{command_text}{failure_text}"
+                    )
+                    if failure.get("message"):
+                        lines.append(f"    - 诊断：{failure['message']}")
+            else:
+                lines.append("- 建库尝试：缓存复用或未记录。")
+            lines.append("")
     if codeql.get("detail"):
         lines.append(f"- 详情：{codeql['detail'][:500]}")
 

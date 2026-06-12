@@ -365,8 +365,10 @@ CodeQL is optional.
 When enabled, the tool tries to:
 
 - Detect CodeQL CLI and available languages.
+- Detect JDK and Maven/Gradle build environments for Java projects, including nested backend projects below a Git/SVN root.
 - Materialize baseline and target source states.
 - Create or reuse CodeQL databases.
+- Prevent an invalid `none` mode for Maven/Gradle Java projects, then safely clean an incomplete database and retry once with a detected build command when `autobuild` fails.
 - Run standard code-scanning query suites.
 - Run built-in custom semantic queries.
 - Classify findings as new, existing, or resolved.
@@ -374,6 +376,8 @@ When enabled, the tool tries to:
 If CodeQL CLI is not installed, the report shows `unavailable` and the rest of the checks continue.
 
 In interactive mode, if the user enables CodeQL but CodeQL CLI is not installed, the tool asks whether to show installation instructions and prints the official setup link. After installation, make sure `codeql version` works, then rerun the check.
+
+Automatic recovery runs at most once and never replaces an explicit `--codeql-build-command`. The "CodeQL Build Diagnostics and Retry" report section records the JDK, build tool, database creation attempts, final build command, and failure category. Dependency resolution or project compilation failures remain explicit CodeQL failures instead of being treated as zero findings.
 
 ## Report Contents
 

@@ -266,6 +266,85 @@ class CodeQLIntegrationTest(unittest.TestCase):
         self.assertIn("## CodeQL 深度分析", report)
         self.assertIn("unavailable", report)
 
+    def test_report_shows_codeql_build_diagnostics_and_retry_attempts(self):
+        data = self.tool.disabled_codeql_result()
+        data.update(
+            {
+                "enabled": True,
+                "available": True,
+                "status": "success",
+                "message": "CodeQL 深度分析完成。",
+                "databases": [
+                    {
+                        "language": "java-kotlin",
+                        "path": "cache/java/database",
+                        "cache_status": "created",
+                        "build_mode": "manual",
+                        "build_command": "mvn -DskipTests compile",
+                        "recovery_status": "success",
+                        "environment": {
+                            "jdk": {"available": True, "detail": 'openjdk version "17"'},
+                            "build_tool": {"available": True, "detail": "Apache Maven 3.9"},
+                        },
+                        "attempts": [
+                            {
+                                "name": "autobuild",
+                                "status": "failed",
+                                "failure": {"category": "compilation-failed", "message": "项目编译失败。"},
+                            },
+                            {
+                                "name": "build-command-retry",
+                                "status": "success",
+                                "command": "mvn -DskipTests compile",
+                            },
+                        ],
+                        "message": "",
+                    }
+                ],
+            }
+        )
+        report_data = {
+            "generated_at": "2026-06-12T00:00:00",
+            "project": "project",
+            "audit_plan": {},
+            "changes": {"source": "snapshot", "range": "current", "changed_files": []},
+            "specs": [],
+            "requirement_items": [],
+            "requirement_commit_mappings": [],
+            "contract_source": "none",
+            "contract_candidates": [],
+            "business_contracts": [],
+            "business_contract_check": {
+                "status": "disabled",
+                "message": "",
+                "total_contracts": 0,
+                "checked_contracts": 0,
+                "unchecked_contracts": [],
+                "violations": [],
+                "differences": [],
+            },
+            "audit_coverage": {
+                "status": "partial",
+                "message": "",
+                "contract_coverage_percent": 100,
+                "manual_review_obligation_count": 0,
+                "reasons": [],
+            },
+            "codeql": data,
+            "findings": [],
+            "suppressed_findings": [],
+            "suppression_summary": {},
+            "summary": {"by_severity": {}, "by_category": {}, "by_file": {}},
+            "mermaid": "flowchart LR\n",
+        }
+
+        report = self.tool.make_report(report_data)
+
+        self.assertIn("CodeQL 构建诊断与重试", report)
+        self.assertIn("mvn -DskipTests compile", report)
+        self.assertIn("compilation-failed", report)
+        self.assertIn("openjdk version", report)
+
     def test_require_codeql_compare_returns_failure_when_comparison_is_unsupported(self):
         self.tool.run_codeql_review = lambda *args, **kwargs: codeql_result("success", comparison_status="unsupported")
 

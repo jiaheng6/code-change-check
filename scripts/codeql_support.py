@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable
 from urllib.parse import unquote, urlparse
@@ -251,6 +253,267 @@ def detect_default_build_mode(project: Path, language: str) -> str:
     return "none"
 
 
+def quote_command_path(value: str) -> str:
+    return f'"{value}"' if any(character.isspace() for character in value) else value
+
+
+def parse_maven_modules(pom: Path) -> list[str]:
+    try:
+        root = ET.fromstring(pom.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ET.ParseError):
+        return []
+    return [
+        (element.text or "").strip().replace("\\", "/")
+        for element in root.iter()
+        if element.tag.rsplit("}", 1)[-1] == "module" and (element.text or "").strip()
+    ]
+
+
+def find_maven_build(project: Path) -> dict | None:
+    project = project.resolve()
+    if not (project / "pom.xml").is_file():
+        candidates = [
+            path
+            for path in project.rglob("pom.xml")
+            if not should_skip(path.relative_to(project))
+        ]
+        if not candidates:
+            return None
+        pom = min(
+            candidates,
+            key=lambda path: (
+                len(path.relative_to(project).parts),
+                0 if parse_maven_modules(path) else 1,
+                path.as_posix(),
+            ),
+        )
+        return {
+            "build_system": "maven",
+            "root": pom.parent,
+            "module": "",
+            "source_root": project,
+        }
+    current = project.parent
+    while current != current.parent:
+        pom = current / "pom.xml"
+        if pom.is_file():
+            for module in parse_maven_modules(pom):
+                if (current / module).resolve() == project:
+                    return {
+                        "build_system": "maven",
+                        "root": current,
+                        "module": module,
+                        "source_root": project,
+                    }
+        current = current.parent
+    return {
+        "build_system": "maven",
+        "root": project,
+        "module": "",
+        "source_root": project,
+    }
+
+
+def find_gradle_build(project: Path) -> dict | None:
+    project = project.resolve()
+    build_names = {"build.gradle", "build.gradle.kts"}
+    settings_names = {"settings.gradle", "settings.gradle.kts"}
+    if not any((project / name).is_file() for name in build_names | settings_names):
+        settings = [
+            path
+            for name in settings_names
+            for path in project.rglob(name)
+            if not should_skip(path.relative_to(project))
+        ]
+        builds = [
+            path
+            for name in build_names
+            for path in project.rglob(name)
+            if not should_skip(path.relative_to(project))
+        ]
+        candidates = settings or builds
+        if not candidates:
+            return None
+        build_file = min(
+            candidates,
+            key=lambda path: (len(path.relative_to(project).parts), path.as_posix()),
+        )
+        return {
+            "build_system": "gradle",
+            "root": build_file.parent,
+            "module": "",
+            "source_root": project,
+        }
+    root = project
+    current = project.parent
+    while current != current.parent:
+        if any((current / name).is_file() for name in settings_names):
+            root = current
+            break
+        current = current.parent
+    return {
+        "build_system": "gradle",
+        "root": root,
+        "module": project.relative_to(root).as_posix() if root != project else "",
+        "source_root": project,
+    }
+
+
+def detect_build_system(project: Path) -> dict | None:
+    return find_maven_build(project) or find_gradle_build(project)
+
+
+def build_tool_executable(build: dict) -> str:
+    root = Path(build["root"])
+    if build["build_system"] == "maven":
+        wrapper_names = ["mvnw.cmd", "mvnw"] if os.name == "nt" else ["mvnw", "mvnw.cmd"]
+        fallback = "mvn"
+    else:
+        wrapper_names = ["gradlew.bat", "gradlew"] if os.name == "nt" else ["gradlew", "gradlew.bat"]
+        fallback = "gradle"
+    wrapper = next((root / name for name in wrapper_names if (root / name).is_file()), None)
+    return str(wrapper.resolve()) if wrapper else fallback
+
+
+def build_retry_command(build: dict | None) -> str:
+    if not build:
+        return ""
+    executable = quote_command_path(build_tool_executable(build))
+    root = Path(build["root"])
+    source_root = Path(build.get("source_root", root))
+    module = build.get("module", "")
+    if build["build_system"] == "maven":
+        if module:
+            return (
+                f"{executable} -f {quote_command_path(str((root / 'pom.xml').resolve()))} "
+                f"-pl {quote_command_path(module)} -am -DskipTests compile"
+            )
+        if root.resolve() != source_root.resolve():
+            return (
+                f"{executable} -f {quote_command_path(str((root / 'pom.xml').resolve()))} "
+                "-DskipTests compile"
+            )
+        return f"{executable} -DskipTests compile"
+    project_option = f" -p {quote_command_path(str(root.resolve()))}" if root else ""
+    task = f":{module.replace('/', ':')}:classes" if module else "classes"
+    return f"{executable}{project_option} {task} -x test"
+
+
+def detect_build_strategy(
+    project: Path,
+    language: str,
+    requested_build_mode: str | None,
+    requested_build_command: str | None,
+) -> dict:
+    build = detect_build_system(project) if language == "java-kotlin" else None
+    if requested_build_command:
+        return {
+            "build_system": build.get("build_system", "") if build else "",
+            "build_root": str(build.get("root", "")) if build else "",
+            "effective_build_mode": "manual",
+            "build_command": requested_build_command,
+            "initial_build_command": requested_build_command,
+            "retry_command": "",
+            "adjustment": "",
+        }
+    effective_build_mode = requested_build_mode or detect_default_build_mode(project, language)
+    adjustment = ""
+    if language == "java-kotlin" and build and effective_build_mode == "none":
+        effective_build_mode = "autobuild"
+        adjustment = "java-build-mode-none-overridden"
+    return {
+        "build_system": build.get("build_system", "") if build else "",
+        "build_root": str(build.get("root", "")) if build else "",
+        "effective_build_mode": effective_build_mode,
+        "build_command": "",
+        "initial_build_command": "",
+        "retry_command": build_retry_command(build) if language == "java-kotlin" else "",
+        "adjustment": adjustment,
+    }
+
+
+def command_status(
+    command: list[str],
+    project: Path,
+    command_runner: CommandRunner,
+) -> dict:
+    code, output = command_runner(command, project)
+    return {
+        "available": code == 0,
+        "command": command,
+        "detail": output[:1000],
+    }
+
+
+def detect_build_environment(
+    project: Path,
+    language: str,
+    build_system: str,
+    command_runner: CommandRunner = run_command,
+) -> dict:
+    if language != "java-kotlin":
+        return {
+            "jdk": {"name": "JDK", "available": True, "command": [], "detail": "当前语言不需要 Java 构建环境。"},
+            "build_tool": {"name": "", "available": True, "command": [], "detail": "当前语言不需要 Java 构建工具。"},
+        }
+    jdk = command_status(["java", "-version"], project, command_runner)
+    jdk["name"] = "JDK"
+    build = detect_build_system(project)
+    if build_system and build:
+        tool = build_tool_executable(build)
+        build_tool = command_status([tool, "-version"], Path(build["root"]), command_runner)
+        build_tool["name"] = build_system
+    else:
+        build_tool = {
+            "name": build_system,
+            "available": not build_system,
+            "command": [],
+            "detail": "未检测到 Maven/Gradle 构建文件。" if not build_system else "未检测到构建工具。",
+        }
+    return {
+        "jdk": jdk,
+        "build_tool": build_tool,
+    }
+
+
+def classify_build_failure(output: str) -> dict:
+    lowered = output.lower()
+    categories = [
+        (
+            "missing-jdk",
+            ("java_home", "java: command not found", "java is not recognized", "no java installation"),
+            "未检测到可用 JDK，或 JAVA_HOME 配置不正确。",
+        ),
+        (
+            "missing-build-tool",
+            ("mvn: command not found", "mvn is not recognized", "gradle: command not found", "gradle is not recognized"),
+            "未检测到可用 Maven/Gradle 构建工具。",
+        ),
+        (
+            "dependency-resolution",
+            ("could not resolve dependencies", "dependency resolution", "could not transfer artifact", "non-resolvable parent"),
+            "项目依赖解析失败，请检查私服、网络、凭据和本地 Maven/Gradle 配置。",
+        ),
+        (
+            "compilation-failed",
+            ("compilation failure", "compilation error", "failed to execute goal", "compiler:compile", "compilejava"),
+            "项目编译失败，CodeQL 无法完成 Java 提取。",
+        ),
+        (
+            "no-source-code",
+            ("no source code was seen", "no code found", "no sources"),
+            "CodeQL 构建过程中没有观察到目标源代码。",
+        ),
+    ]
+    for category, patterns, message in categories:
+        if any(pattern in lowered for pattern in patterns):
+            return {"category": category, "message": message}
+    return {
+        "category": "build-failed",
+        "message": "CodeQL database 创建失败，未能从日志中识别更具体的构建原因。",
+    }
+
+
 def normalize_sarif_uri(uri: str) -> str:
     parsed = urlparse(uri)
     if parsed.scheme == "file":
@@ -383,6 +646,38 @@ def clear_incomplete_database(database: Path, language_root: Path) -> None:
         shutil.rmtree(database)
 
 
+def build_attempt(
+    project: Path,
+    database: Path,
+    language: str,
+    executable: str,
+    *,
+    name: str,
+    build_mode: str | None,
+    build_command: str | None,
+    command_runner: CommandRunner,
+) -> tuple[int, str, dict]:
+    code, output = create_database(
+        project,
+        database,
+        language,
+        executable,
+        build_mode,
+        build_command,
+        command_runner,
+    )
+    attempt = {
+        "name": name,
+        "status": "success" if code == 0 else "failed",
+        "build_mode": "manual" if build_command else build_mode,
+        "command": build_command or "",
+        "detail": output[:2000],
+    }
+    if code != 0:
+        attempt["failure"] = classify_build_failure(output)
+    return code, output, attempt
+
+
 def run_codeql_analysis(
     project: Path,
     output: Path,
@@ -443,39 +738,146 @@ def run_codeql_analysis(
         result["status"] = "failed"
         result["message"] = f"无法使用 CodeQL 缓存目录：{error}"
         return result
-    cache_key = build_cache_key(project, result["version"], selected_languages, build_mode, build_command)
+    strategies = {
+        language: detect_build_strategy(project, language, build_mode, build_command)
+        for language in selected_languages
+    }
+    strategy_fingerprint = json.dumps(
+        {
+            language: {
+                "build_mode": strategy["effective_build_mode"],
+                "build_command": strategy["initial_build_command"],
+                "retry_command": strategy["retry_command"],
+            }
+            for language, strategy in strategies.items()
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    cache_key = build_cache_key(
+        project,
+        result["version"],
+        selected_languages,
+        strategy_fingerprint,
+        build_command,
+    )
     analysis_failed = False
     for language in selected_languages:
-        effective_build_mode = build_mode or detect_default_build_mode(project, language)
+        strategy = strategies[language]
+        effective_build_mode = strategy["effective_build_mode"]
+        actual_build_mode = effective_build_mode
+        actual_build_command = strategy["initial_build_command"]
+        recovery_status = "not-attempted"
+        attempts = []
+        build_environment = detect_build_environment(
+            project,
+            language,
+            strategy["build_system"],
+            command_runner,
+        )
         language_root = cache_root / cache_key / language
         database = language_root / "database"
         metadata = language_root / "metadata.json"
         cache_status = "reused" if database.exists() and metadata.exists() else "created"
+        database_info = {
+            "language": language,
+            "path": str(database),
+            "cache_status": cache_status,
+            "build_mode": actual_build_mode,
+            "build_command": actual_build_command,
+            "build_system": strategy["build_system"],
+            "build_root": strategy["build_root"],
+            "strategy_adjustment": strategy["adjustment"],
+            "recovery_status": recovery_status,
+            "environment": build_environment,
+            "attempts": attempts,
+            "message": "",
+        }
         if cache_status == "created":
             try:
                 language_root.mkdir(parents=True, exist_ok=True)
                 clear_incomplete_database(database, language_root)
-                create_code, create_output = create_database(
+                create_code, create_output, attempt = build_attempt(
                     project,
                     database,
                     language,
                     executable,
-                    build_mode,
-                    build_command,
-                    command_runner,
+                    name="build-command" if actual_build_command else effective_build_mode,
+                    build_mode=effective_build_mode,
+                    build_command=actual_build_command or None,
+                    command_runner=command_runner,
                 )
+                attempts.append(attempt)
             except (OSError, ValueError) as error:
                 create_code, create_output = 1, f"无法创建 CodeQL database：{error}"
-            if create_code != 0:
-                analysis_failed = True
-                result["databases"].append(
+                attempts.append(
                     {
-                        "language": language,
-                        "path": str(database),
-                        "cache_status": "create-failed",
-                        "message": create_output,
+                        "name": "build-command" if actual_build_command else effective_build_mode,
+                        "status": "failed",
+                        "build_mode": actual_build_mode,
+                        "command": actual_build_command,
+                        "detail": create_output,
+                        "failure": classify_build_failure(create_output),
                     }
                 )
+
+            should_retry = (
+                create_code != 0
+                and language == "java-kotlin"
+                and not build_command
+                and effective_build_mode == "autobuild"
+                and bool(strategy["retry_command"])
+            )
+            if should_retry:
+                recovery_status = "attempted"
+                try:
+                    clear_incomplete_database(database, language_root)
+                    create_code, create_output, attempt = build_attempt(
+                        project,
+                        database,
+                        language,
+                        executable,
+                        name="build-command-retry",
+                        build_mode=None,
+                        build_command=strategy["retry_command"],
+                        command_runner=command_runner,
+                    )
+                    attempts.append(attempt)
+                except (OSError, ValueError) as error:
+                    create_code, create_output = 1, f"CodeQL 构建命令重试失败：{error}"
+                    attempts.append(
+                        {
+                            "name": "build-command-retry",
+                            "status": "failed",
+                            "build_mode": "manual",
+                            "command": strategy["retry_command"],
+                            "detail": create_output,
+                            "failure": classify_build_failure(create_output),
+                        }
+                    )
+                actual_build_mode = "manual"
+                actual_build_command = strategy["retry_command"]
+                recovery_status = "success" if create_code == 0 else "failed"
+            elif create_code == 0:
+                recovery_status = "not-needed"
+
+            database_info.update(
+                {
+                    "build_mode": actual_build_mode,
+                    "build_command": actual_build_command,
+                    "recovery_status": recovery_status,
+                    "attempts": attempts,
+                }
+            )
+            if create_code != 0:
+                analysis_failed = True
+                try:
+                    clear_incomplete_database(database, language_root)
+                except (OSError, ValueError) as error:
+                    create_output = f"{create_output}\n无法清理失败的 CodeQL database：{error}"
+                database_info["cache_status"] = "create-failed"
+                database_info["message"] = create_output
+                result["databases"].append(database_info)
                 continue
             try:
                 metadata.write_text(
@@ -484,8 +886,14 @@ def run_codeql_analysis(
                             "cache_key": cache_key,
                             "language": language,
                             "version": result["version"],
-                            "build_mode": effective_build_mode,
-                            "build_command": build_command or "",
+                            "build_mode": actual_build_mode,
+                            "build_command": actual_build_command,
+                            "build_system": strategy["build_system"],
+                            "build_root": strategy["build_root"],
+                            "strategy_adjustment": strategy["adjustment"],
+                            "recovery_status": recovery_status,
+                            "environment": build_environment,
+                            "attempts": attempts,
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -494,23 +902,30 @@ def run_codeql_analysis(
                 )
             except OSError as error:
                 analysis_failed = True
-                result["databases"].append(
-                    {
-                        "language": language,
-                        "path": str(database),
-                        "cache_status": "metadata-failed",
-                        "message": f"无法写入 CodeQL 缓存元数据：{error}",
-                    }
-                )
+                database_info["cache_status"] = "metadata-failed"
+                database_info["message"] = f"无法写入 CodeQL 缓存元数据：{error}"
+                result["databases"].append(database_info)
                 continue
-
-        database_info = {
-            "language": language,
-            "path": str(database),
-            "cache_status": cache_status,
-            "build_mode": effective_build_mode,
-            "message": "",
-        }
+        else:
+            try:
+                cached_metadata = json.loads(metadata.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                cached_metadata = {}
+            database_info.update(
+                {
+                    "build_mode": cached_metadata.get("build_mode", actual_build_mode),
+                    "build_command": cached_metadata.get("build_command", actual_build_command),
+                    "build_system": cached_metadata.get("build_system", strategy["build_system"]),
+                    "build_root": cached_metadata.get("build_root", strategy["build_root"]),
+                    "strategy_adjustment": cached_metadata.get(
+                        "strategy_adjustment",
+                        strategy["adjustment"],
+                    ),
+                    "recovery_status": cached_metadata.get("recovery_status", "cache-reused"),
+                    "environment": cached_metadata.get("environment", build_environment),
+                    "attempts": cached_metadata.get("attempts", []),
+                }
+            )
         result["databases"].append(database_info)
         sarif_path = output / "codeql" / f"{language}.sarif"
         try:
