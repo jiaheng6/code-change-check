@@ -22,6 +22,20 @@ class SkillInstructionsTest(unittest.TestCase):
         self.assertIn("--response-snapshot", content)
         self.assertIn("--include-support-findings", content)
 
+    def test_readme_explains_installation_workflow_and_terms(self):
+        content = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("CC Switch", content)
+        self.assertIn("ZIP", content)
+        self.assertIn("独立审查会话", content)
+        self.assertIn("```mermaid", content)
+        self.assertIn("## 近期亮点", content)
+        self.assertIn("## 名词解释", content)
+        self.assertIn("迭代范围", content)
+        self.assertIn("业务契约", content)
+        self.assertIn("CodeQL", content)
+        self.assertIn("证据", content)
+
 
 if __name__ == "__main__":
     unittest.main()

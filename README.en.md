@@ -30,6 +30,15 @@ Typical problems include:
 - Outputs a JSON evidence bundle and a Markdown audit report.
 - Can be used as a Skill/rules package for Claude Code, Codex, and Cline.
 
+## Recent Highlights
+
+- **Confirmed audit plans**: lock the project directory, iteration scope, requirement documents, contract source, and CodeQL options before execution. Any parameter change requires reconfirmation.
+- **Git/SVN context preflight**: identifies the relationship between the current directory and the Git/SVN working-copy root, reducing scope mistakes when started from an SVN subdirectory.
+- **Structured JSON contract checks**: compare field paths and stable `label` values between expected contracts and actual responses.
+- **Unchecked is not passed**: missing response snapshots, non-executable contracts, and unavailable CodeQL runs are reported explicitly instead of being treated as successful.
+- **Risk noise suppression without losing evidence**: text matches from tests, docs, debug logs, and fixtures move to a suppressed evidence section by default while remaining in the JSON evidence bundle.
+- **Baseline/target comparison**: CodeQL and lightweight semantic analysis focus on before/after differences to separate new, existing, and resolved issues.
+
 ## When To Use It
 
 Use this tool when:
@@ -120,7 +129,13 @@ When triggered through `/code-change-check` in Claude Code, the shell is usually
 
 After confirmation, run the check with `--no-interactive` and explicit arguments.
 
-### Option 4: Use With Cline
+### Option 4: Import With CC Switch
+
+If you use CC Switch, download this project as a ZIP file and import it directly into CC Switch to install it as a Skill. No manual directory copy is required.
+
+Before importing, make sure the extracted ZIP root contains `SKILL.md` directly instead of placing it under an unrelated extra directory.
+
+### Option 5: Use With Cline
 
 Copy the Cline adapter into your target project:
 
@@ -132,6 +147,44 @@ Source file:
 
 ```text
 adapters/cline/code-change-check.md
+```
+
+## Use A Separate Review Session
+
+After completing an implementation iteration, start a new Claude Code or Codex conversation before running `code-change-check`.
+
+A separate review session:
+
+- reduces the chance that the reviewer inherits design assumptions, implementation explanations, and self-justification from the original development conversation;
+- keeps review evidence, reports, and investigation details from consuming the original development context.
+
+The review session should still access the same project directory, but it should treat requirements, designs, tasks, iteration scope, and contracts as inputs to verify rather than conclusions to trust.
+
+## Workflow
+
+```mermaid
+flowchart TD
+    A["Start a separate review session"] --> B["Launch code-change-check"]
+    B --> C["Preflight Python, Git/SVN context, and CodeQL"]
+    C --> D["Confirm project directory and iteration scope"]
+    D --> E["Read requirements, designs, and tasks"]
+    D --> F["Choose the business contract source"]
+    F --> F1["Explicit contract files"]
+    F --> F2["Pre-iteration code"]
+    F --> F3["Contract files and old code"]
+    E --> G["Generate and confirm the audit plan"]
+    F1 --> G
+    F2 --> G
+    F3 --> G
+    G --> H["Extract changes, commits, and semantic inventory"]
+    H --> I["Run business contract checks"]
+    H --> J["Run optional CodeQL baseline/target comparison"]
+    H --> K["Run text rules and suppress low-confidence evidence"]
+    I --> L["Generate JSON evidence and Markdown report"]
+    J --> L
+    K --> L
+    L --> M["Prioritize risks, structured differences, and unchecked items"]
+    M --> N["Apply human judgment, tests, and fixes"]
 ```
 
 ## Quick Start
@@ -335,6 +388,24 @@ The Markdown report includes:
 - Suggested verification steps.
 
 The JSON evidence bundle contains the complete structured data and is suitable for scripts or follow-up AI analysis.
+
+## Glossary
+
+| Term | Meaning |
+| --- | --- |
+| Iteration scope | The exact code-change boundary under review: selected Git commits, an SVN revision range, two directory snapshots, or explicitly selected working-tree changes. |
+| Business contract | A business or integration rule that code must preserve, such as internal addressing, required third-party arguments, or required response fields. It includes both explicit protocols and stable implicit conventions. |
+| Candidate contract | A possible business rule extracted from pre-iteration code. It requires human confirmation so historical defects do not become standards. |
+| Contract source | Where review standards come from: explicit contract files, pre-iteration code, or both. |
+| Baseline / target | The state before the iteration and the state being reviewed. Comparing them separates new, existing, and resolved issues. |
+| CodeQL | GitHub's semantic code analysis engine. It builds a queryable code database to find cross-function, cross-file data-flow and security issues. This tool uses it as an optional deep-analysis layer. |
+| Evidence | Traceable information supporting an audit conclusion, such as changed files, code locations, rule matches, contract differences, commits, or CodeQL results. |
+| Primary finding | A high-value clue that should be reviewed first. It is a review lead, not automatically a confirmed defect. |
+| Suppressed finding | A lower-confidence text match from support files such as tests, docs, debug logs, or fixtures. It stays in the evidence bundle but does not mix with primary findings by default. |
+| Unchecked contract | A recognized contract that could not be verified because inputs or execution support were missing. Unchecked does not mean passed. |
+| Response snapshot | An actual JSON response sample used to compare field paths and stable values with a JSON response contract. |
+| Semantic inventory / difference | Structured clues extracted from code, such as calls, addressing, fields, and states, plus their before/after changes. |
+| Audit plan | The locked set of execution inputs, including project directory, iteration scope, requirements, contract source, and CodeQL options. Parameter changes require reconfirmation. |
 
 ## How It Differs From A Diff Reader
 
