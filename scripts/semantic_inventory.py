@@ -279,8 +279,8 @@ def merge_semantic_inventories(primary: dict, secondary: dict | None) -> dict:
             items.append(item)
     return {
         "status": primary.get("status", "failed"),
-        "engine": "lightweight+codeql",
-        "message": "已合并轻量语义清单和 CodeQL 语义查询结果。",
+        "engine": "lightweight+spoon",
+        "message": "已合并轻量语义清单和 Spoon 语义查询结果。",
         "errors": [*primary.get("errors", []), *secondary.get("errors", [])],
         "items": items,
     }

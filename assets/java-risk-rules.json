@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "rules": {
+    "field-mapping-source-changed": "critical",
+    "http-address-source-changed": "critical",
+    "call-arguments-changed": "high",
+    "guard-removed": "critical",
+    "state-condition-changed": "high",
+    "database-write-source-changed": "high"
+  }
+}

@@ -330,12 +330,52 @@ def evaluate_json_shape_contract(contract: dict, response_snapshots: dict[str, d
     ]
 
 
+def evaluate_field_mapping_contract(contract: dict, inventory: dict) -> list[dict]:
+    slot = contract.get("slot", "")
+    expected_source = contract.get("expected_source", "")
+    if not slot or not expected_source:
+        return []
+    mappings = [
+        item
+        for item in inventory_items(inventory, "field-mapping", contract_scope_file(contract))
+        if item.get("slot") == slot
+    ]
+    if mappings and any(item.get("source_expression") == expected_source for item in mappings):
+        return []
+    actual = ", ".join(
+        sorted({item.get("source_expression", "") for item in mappings if item.get("source_expression")})
+    ) or "missing"
+    first = mappings[0] if mappings else contract
+    return [
+        make_violation(
+            contract,
+            "contract-field-mapping",
+            "critical",
+            first.get("file", contract.get("file", "")),
+            int(first.get("line", contract.get("line", 1))),
+            f"字段映射 {slot} 的值来源不符合业务契约。",
+            expected_source,
+            actual,
+            {
+                "kind": "field-mapping",
+                "slot": slot,
+                "expected": expected_source,
+                "actual": actual,
+                "missing": [] if mappings else [slot],
+                "added": [],
+            },
+        )
+    ]
+
+
 def contract_unchecked_reason(contract: dict, response_snapshots: dict[str, dict]) -> str | None:
     kind = contract.get("kind", "")
     if kind == "json-shape":
         if str(contract.get("match_key", "")).lower() not in response_snapshots:
             return "没有找到同文件名的实际响应快照，无法执行 JSON 字段形状对比。"
         return None
+    if kind == "field-mapping":
+        return None if contract.get("slot") and contract.get("expected_source") else "字段映射契约缺少 slot 或 expected_source。"
     if kind == "addressing":
         return None if expected_addressing(contract) else "寻址契约无法解析出明确期望值。"
     if kind == "call-shape":
@@ -366,6 +406,8 @@ def evaluate_one_contract(
     violations = []
     if kind == "json-shape":
         return evaluate_json_shape_contract(contract, response_snapshots)
+    if kind == "field-mapping":
+        return evaluate_field_mapping_contract(contract, inventory)
     if kind in {"addressing", "text-rule"}:
         violations.extend(evaluate_addressing_contract(contract, inventory))
     if kind in {"call-shape", "text-rule"}:

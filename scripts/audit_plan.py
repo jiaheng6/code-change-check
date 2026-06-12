@@ -28,16 +28,9 @@ AUDIT_PLAN_FIELDS = [
     "confirm_contracts",
     "no_confirm_contracts",
     "rules",
-    "codeql",
-    "no_codeql",
-    "require_codeql",
-    "no_codeql_compare",
-    "require_codeql_compare",
-    "codeql_executable",
-    "codeql_language",
-    "codeql_build_mode",
-    "codeql_build_command",
-    "codeql_cache",
+    "java_analysis",
+    "tool_cache",
+    "offline",
     "output",
     "scan_all",
     "include_support_findings",
@@ -75,7 +68,7 @@ def build_audit_plan(args: argparse.Namespace) -> dict:
     plan["response_snapshot"] = resolve_path_list(args.response_snapshot, project)
     plan["rules"] = resolve_path(args.rules)
     plan["output"] = resolve_path(args.output)
-    plan["codeql_cache"] = resolve_path(args.codeql_cache, project)
+    plan["tool_cache"] = resolve_path(args.tool_cache, project)
     plan.update(build_plan_review(plan))
     return plan
 

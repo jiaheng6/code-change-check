@@ -21,8 +21,8 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from contract_rules import evaluate_contracts
-from codeql_comparison import run_codeql_review
-from semantic_inventory import extract_semantic_inventory, extract_text_inventory
+from java_analysis import disabled_java_analysis_result, run_java_analysis
+from semantic_inventory import extract_text_inventory
 from audit_plan import apply_audit_plan, build_audit_plan, confirm_audit_plan, load_audit_plan, save_audit_plan
 from audit_coverage import (
     assess_audit_coverage,
@@ -115,10 +115,6 @@ CONTRACT_GLOBS = [
     "*contract*.md",
     "*契约*.md",
 ]
-
-CODEQL_SETUP_URL = "https://docs.github.com/en/code-security/codeql-cli/getting-started-with-the-codeql-cli/setting-up-the-codeql-cli"
-GH_CODEQL_URL = "https://github.com/github/gh-codeql"
-
 
 @dataclasses.dataclass(frozen=True)
 class RiskPattern:
@@ -590,6 +586,10 @@ def iter_project_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if path.is_file() and not should_skip(path.relative_to(root)) and is_text_file(path):
             yield path
+
+
+def project_has_java(root: Path) -> bool:
+    return any(path.suffix.lower() == ".java" for path in iter_project_files(root))
 
 
 def parse_git_log_records(raw: str) -> list[dict]:
@@ -1336,84 +1336,6 @@ def confirm_business_contracts(contracts: list[dict], choose_contracts=None) -> 
     return [contract for label, contract in zip(labels, contracts) if label in selected_set]
 
 
-def choose_codeql_enabled() -> bool:
-    labels = ["启用 CodeQL 深度分析"]
-    return bool(choose_items("请选择是否启用 CodeQL 深度分析", labels))
-
-
-def resolve_codeql_enabled(args: argparse.Namespace, choose_enabled=None) -> bool:
-    if args.no_codeql:
-        return False
-    if args.codeql or args.require_codeql or args.require_codeql_compare:
-        return True
-    if args.interactive:
-        chooser = choose_enabled or choose_codeql_enabled
-        return bool(chooser())
-    return False
-
-
-def maybe_prompt_codeql_installation(
-    args: argparse.Namespace,
-    codeql: dict,
-    read_input=None,
-    output=None,
-) -> bool:
-    if not args.interactive or codeql.get("status") != "unavailable":
-        return False
-    read_input = input if read_input is None else read_input
-    output = sys.stdout if output is None else output
-    output.write("\n未检测到 CodeQL CLI，CodeQL 深度分析已跳过。\n")
-    output.write("CodeQL 是可选依赖；未安装时，工具仍会继续生成非 CodeQL 报告。\n")
-    try:
-        answer = read_input("是否查看 CodeQL 安装方式？[y/N] ").strip().lower()
-    except EOFError:
-        output.write("未收到输入，已跳过 CodeQL 安装提示，本次继续生成报告。\n")
-        return True
-    if answer in {"y", "yes", "是"}:
-        output.write("\nCodeQL 安装方式：\n")
-        output.write(f"- 官方安装文档：{CODEQL_SETUP_URL}\n")
-        output.write(f"- GitHub CLI 扩展方案：{GH_CODEQL_URL}\n")
-        output.write("- 安装后请确认 `codeql version` 可以正常执行，再重新运行本工具。\n")
-    else:
-        output.write("已跳过 CodeQL 安装提示，本次继续生成报告。\n")
-    return True
-
-
-def disabled_codeql_result() -> dict:
-    return {
-        "enabled": False,
-        "available": False,
-        "status": "disabled",
-        "message": "本次检查未启用 CodeQL 深度分析。",
-        "detail": "",
-        "version": "",
-        "source_scope": "",
-        "detected_languages": [],
-        "languages": [],
-        "databases": [],
-        "sarif_files": [],
-        "findings": [],
-        "comparison": {
-            "status": "disabled",
-            "message": "本次检查未启用 CodeQL baseline/target 对比。",
-            "baseline": None,
-            "target": None,
-            "baseline_status": "",
-            "target_status": "",
-            "new_findings": [],
-            "existing_findings": [],
-            "resolved_findings": [],
-            "semantic": {
-                "status": "disabled",
-                "message": "本次检查未启用业务语义对比。",
-                "baseline_inventory": None,
-                "target_inventory": None,
-                "changes": [],
-            },
-        },
-    }
-
-
 def semantic_changes_to_findings(changes: list[dict]) -> list[Finding]:
     return [
         Finding(
@@ -1448,12 +1370,17 @@ def contract_violations_to_findings(violations: list[dict]) -> list[Finding]:
     ]
 
 
-def codeql_target_inventory(codeql: dict) -> dict | None:
-    return (
-        codeql.get("comparison", {})
-        .get("semantic", {})
-        .get("target_inventory")
-    )
+def java_analysis_target_inventory(java_analysis: dict) -> dict | None:
+    core = java_analysis.get("target", {}).get("core", {})
+    if not core:
+        return None
+    return {
+        "status": core.get("status", "failed"),
+        "engine": "spoon",
+        "message": core.get("message", ""),
+        "errors": core.get("errors", []),
+        "items": core.get("evidence", []),
+    }
 
 
 def load_custom_patterns(rules_path: Path | None) -> list[RiskPattern]:
@@ -1776,122 +1703,43 @@ def make_report(data: dict) -> str:
     else:
         lines.append("- 未生成结构化差异。")
 
-    codeql = data.get("codeql", disabled_codeql_result())
-    lines.extend(["", "## CodeQL 深度分析", ""])
-    lines.append(f"- 是否启用：{'是' if codeql.get('enabled') else '否'}")
-    lines.append(f"- 状态：`{codeql.get('status', 'disabled')}`")
-    lines.append(f"- CodeQL CLI 可用：{'是' if codeql.get('available') else '否'}")
-    if codeql.get("version"):
-        lines.append(f"- 版本：`{codeql['version']}`")
-    if codeql.get("source_scope"):
-        lines.append(f"- 分析代码范围：`{codeql['source_scope']}`")
-    lines.append(f"- 检测语言：{', '.join(codeql.get('detected_languages', [])) or '无'}")
-    lines.append(f"- 分析语言：{', '.join(codeql.get('languages', [])) or '无'}")
-    lines.append(f"- CodeQL 风险命中数：{len(codeql.get('findings', []))}")
-    lines.append(f"- 说明：{codeql.get('message', '')}")
-    if codeql.get("databases"):
-        lines.append("")
-        lines.append("数据库：")
-        for database in codeql["databases"]:
-            lines.append(
-                f"- `{database.get('language', '')}` 构建模式 `{database.get('build_mode', '')}` "
-                f"缓存 `{database.get('cache_status', '')}` 路径 `{database.get('path', '')}`"
-            )
-            if database.get("build_command"):
-                lines.append(f"  - 实际构建命令：`{database['build_command']}`")
-            if database.get("recovery_status"):
-                lines.append(f"  - 构建恢复状态：`{database['recovery_status']}`")
-            if database.get("message"):
-                lines.append(f"  - 错误：{database['message'][:500]}")
-        lines.extend(["", "### CodeQL 构建诊断与重试", ""])
-        for database in codeql["databases"]:
-            lines.append(f"#### `{database.get('language', '')}`")
-            lines.append("")
-            lines.append(f"- 构建系统：`{database.get('build_system', '') or '未检测到'}`")
-            lines.append(f"- 构建模式：`{database.get('build_mode', '') or '未知'}`")
-            lines.append(f"- 恢复状态：`{database.get('recovery_status', '') or '未记录'}`")
-            if database.get("strategy_adjustment"):
-                lines.append(f"- 策略调整：`{database['strategy_adjustment']}`")
-            if database.get("build_command"):
-                lines.append(f"- 最终构建命令：`{database['build_command']}`")
-            environment = database.get("environment", {})
-            for label, key in [("JDK", "jdk"), ("构建工具", "build_tool")]:
-                item = environment.get(key, {})
-                detail = str(item.get("detail", "")).replace("\r", " ").replace("\n", " / ")
-                lines.append(
-                    f"- {label}：`{'可用' if item.get('available') else '不可用'}`"
-                    f"{f'；{detail[:500]}' if detail else ''}"
-                )
-            attempts = database.get("attempts", [])
-            if attempts:
-                lines.append("- 建库尝试：")
-                for index, attempt in enumerate(attempts, start=1):
-                    failure = attempt.get("failure", {})
-                    command = attempt.get("command", "")
-                    command_text = f"；命令 `{command}`" if command else ""
-                    failure_text = (
-                        f"；失败分类 `{failure.get('category', '')}`"
-                        if failure
-                        else ""
-                    )
-                    lines.append(
-                        f"  - 第 {index} 次 `{attempt.get('name', '')}`：`{attempt.get('status', '')}`"
-                        f"{command_text}{failure_text}"
-                    )
-                    if failure.get("message"):
-                        lines.append(f"    - 诊断：{failure['message']}")
-            else:
-                lines.append("- 建库尝试：缓存复用或未记录。")
-            lines.append("")
-    if codeql.get("detail"):
-        lines.append(f"- 详情：{codeql['detail'][:500]}")
-
-    comparison = codeql.get("comparison", {})
-    lines.extend(["", "## CodeQL baseline/target 对比", ""])
+    java_analysis = data.get("java_analysis", disabled_java_analysis_result())
+    coverage = java_analysis.get("coverage", {})
+    core = java_analysis.get("target", {}).get("core", {})
+    graph = java_analysis.get("target", {}).get("code_graph", {})
+    comparison = java_analysis.get("comparison", {})
+    lines.extend(["", "## Java 语义分析", ""])
+    lines.append(f"- 状态：`{java_analysis.get('status', 'disabled')}`")
+    lines.append(f"- 说明：{java_analysis.get('message', '')}")
+    lines.extend(["", "## Java 分析覆盖率", ""])
+    lines.append(f"- Java 文件总数：{coverage.get('java_files_total', 0)}")
+    lines.append(f"- 成功解析：{coverage.get('java_files_parsed', 0)}")
+    lines.append(f"- 解析失败：{coverage.get('java_files_failed', 0)}")
+    lines.append(f"- 核心证据完整：{'是' if coverage.get('core_complete') else '否'}")
+    lines.append(f"- 调用图完整：{'是' if coverage.get('graph_complete') else '否'}")
+    lines.append(f"- baseline/target 比较完整：{'是' if coverage.get('comparison_complete') else '否'}")
+    if core.get("errors"):
+        lines.append("- 未解析文件或错误：")
+        for error in core["errors"][:50]:
+            lines.append(f"  - {error}")
+    lines.extend(["", "## 调用链与影响范围", ""])
+    lines.append(f"- 状态：`{graph.get('status', 'disabled')}`")
+    lines.append(f"- 调用者证据：{len(graph.get('callers', []))}")
+    lines.append(f"- 被调方法证据：{len(graph.get('callees', []))}")
+    lines.append(f"- 影响范围证据：{len(graph.get('impacts', []))}")
+    lines.append(f"- 受影响测试：{len(graph.get('affected_tests', []))}")
+    for test in graph.get("affected_tests", [])[:50]:
+        lines.append(f"  - `{test}`")
+    lines.extend(["", "## baseline/target 业务语义差异", ""])
     lines.append(f"- 状态：`{comparison.get('status', 'disabled')}`")
     lines.append(f"- 说明：{comparison.get('message', '')}")
-    if comparison.get("baseline"):
+    changes = comparison.get("changes", [])
+    lines.append(f"- 语义变化数：{len(changes)}")
+    for change in changes[:100]:
         lines.append(
-            f"- baseline：`{comparison['baseline'].get('kind', '')}:{comparison['baseline'].get('value', '')}`"
+            f"- `{change.get('severity', '')}` `{change.get('file', '')}:{change.get('line', 1)}` "
+            f"`{change.get('type', '')}` {change.get('message', '')}"
         )
-    if comparison.get("target"):
-        lines.append(
-            f"- target：`{comparison['target'].get('kind', '')}:{comparison['target'].get('value', '')}`"
-        )
-    if comparison.get("baseline_status"):
-        lines.append(f"- baseline 分析状态：`{comparison['baseline_status']}`")
-    if comparison.get("target_status"):
-        lines.append(f"- target 分析状态：`{comparison['target_status']}`")
-    lines.append(f"- 新增 CodeQL 命中：{len(comparison.get('new_findings', []))}")
-    lines.append(f"- 已有 CodeQL 命中：{len(comparison.get('existing_findings', []))}")
-    lines.append(f"- 已消失 CodeQL 命中：{len(comparison.get('resolved_findings', []))}")
-    if comparison.get("new_findings"):
-        lines.append("")
-        lines.append("新增命中：")
-        for finding in comparison["new_findings"][:50]:
-            lines.append(
-                f"- `{finding.get('severity', '')}` `{finding.get('file', '')}:{finding.get('line', 1)}` "
-                f"{finding.get('title', '')}：{finding.get('message', '')}"
-            )
-
-    semantic = comparison.get("semantic", {})
-    semantic_changes = semantic.get("changes", [])
-    lines.extend(["", "## 业务语义差异", ""])
-    lines.append(f"- 状态：`{semantic.get('status', 'disabled')}`")
-    lines.append(f"- 说明：{semantic.get('message', '')}")
-    baseline_inventory = semantic.get("baseline_inventory") or {}
-    target_inventory = semantic.get("target_inventory") or {}
-    lines.append(f"- baseline 清单项：{len(baseline_inventory.get('items', []))}")
-    lines.append(f"- target 清单项：{len(target_inventory.get('items', []))}")
-    lines.append(f"- 语义变化数：{len(semantic_changes)}")
-    if semantic_changes:
-        for change in semantic_changes[:100]:
-            lines.append(
-                f"- `{change.get('severity', '')}` `{change.get('file', '')}:{change.get('line', 1)}` "
-                f"`{change.get('type', '')}` {change.get('message', '')}"
-            )
-    else:
-        lines.append("- 未生成语义差异，或未发现当前规则支持的语义变化。")
 
     lines.extend(["", "## 需求和任务线索", ""])
     if data["specs"]:
@@ -1987,25 +1835,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--confirm-contracts", action="store_true", help="交互确认本次审计启用的候选契约")
     parser.add_argument("--no-confirm-contracts", action="store_true", help="跳过候选契约确认并启用全部候选契约")
     parser.add_argument("--rules", help="自定义 JSON 风险规则文件")
-    codeql_group = parser.add_mutually_exclusive_group()
-    codeql_group.add_argument("--codeql", action="store_true", help="启用 CodeQL 深度分析")
-    codeql_group.add_argument("--no-codeql", action="store_true", help="禁用 CodeQL 深度分析")
-    parser.add_argument("--require-codeql", action="store_true", help="要求 CodeQL 分析成功，否则返回失败状态")
-    parser.add_argument("--no-codeql-compare", action="store_true", help="禁用 CodeQL baseline/target 对比")
     parser.add_argument(
-        "--require-codeql-compare",
-        action="store_true",
-        help="要求 CodeQL baseline/target 对比成功，否则返回失败状态",
+        "--java-analysis",
+        choices=["auto", "required", "off"],
+        default="auto",
+        help="Java 语义分析模式：自动执行、必须成功或关闭",
     )
-    parser.add_argument("--codeql-executable", default="codeql", help="CodeQL CLI 可执行命令或路径")
-    parser.add_argument("--codeql-language", action="append", default=[], help="指定 CodeQL 分析语言，可重复传入")
-    parser.add_argument(
-        "--codeql-build-mode",
-        choices=["none", "autobuild", "manual"],
-        help="指定 CodeQL database 创建使用的构建模式",
-    )
-    parser.add_argument("--codeql-build-command", help="指定 CodeQL database 创建使用的构建命令")
-    parser.add_argument("--codeql-cache", help="指定 CodeQL database 缓存目录")
+    parser.add_argument("--tool-cache", help="指定 Java 分析运行时和辅助工具缓存目录")
+    parser.add_argument("--offline", action="store_true", help="离线模式，不自动下载任何运行时")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
     parser.add_argument("--include-support-findings", action="store_true", help="把测试、文档、调试和 fixture 文本命中纳入正式风险")
@@ -2090,28 +1927,18 @@ def main(argv: list[str]) -> int:
         changes = collect_interactive_changes(project, args.commit_limit)
     else:
         changes = collect_changes(project, baseline, args.base_ref, args.target_ref, args.svn_revision)
-    codeql_enabled = resolve_codeql_enabled(args)
-    codeql = disabled_codeql_result()
-    if codeql_enabled:
-        cache_root = None
-        if args.codeql_cache:
-            cache_root = Path(args.codeql_cache)
-            if not cache_root.is_absolute():
-                cache_root = project / cache_root
-            cache_root = cache_root.resolve()
-        codeql = run_codeql_review(
+    has_java = project_has_java(project)
+    java_analysis = disabled_java_analysis_result()
+    if has_java and args.java_analysis != "off":
+        cache_root = Path(args.tool_cache).expanduser().resolve() if args.tool_cache else None
+        java_analysis = run_java_analysis(
             project,
-            output,
             changes,
+            output / "java-analysis",
             baseline_path=baseline,
-            compare=not args.no_codeql_compare,
-            languages=args.codeql_language or None,
-            executable=args.codeql_executable,
-            build_mode=args.codeql_build_mode,
-            build_command=args.codeql_build_command,
-            cache_root=cache_root,
+            tool_cache=cache_root,
+            offline=args.offline,
         )
-        maybe_prompt_codeql_installation(args, codeql)
     spec_files = discover_spec_files(project, args.spec, strict=args.strict_spec)
     specs = extract_spec_summary(project, spec_files)
     requirement_items = build_requirement_items(specs)
@@ -2158,9 +1985,7 @@ def main(argv: list[str]) -> int:
     )
     target_inventory = None
     if business_contracts:
-        target_inventory = codeql_target_inventory(codeql) if codeql_enabled else None
-        if target_inventory is None:
-            target_inventory = extract_semantic_inventory(project)
+        target_inventory = java_analysis_target_inventory(java_analysis)
     response_snapshots = load_response_snapshots(
         project,
         [str(path) for path in role_validation["valid_snapshot_files"]],
@@ -2183,20 +2008,14 @@ def main(argv: list[str]) -> int:
     audit_coverage = assess_audit_coverage(
         changes=changes,
         contract_check=business_contract_check,
-        codeql=codeql,
+        java_analysis=java_analysis,
         role_issues=role_validation["issues"],
         missing_referenced_artifacts=referenced_artifacts["missing"],
         manual_review_obligations=manual_review_obligations,
     )
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
     findings.extend(contract_violations_to_findings(business_contract_check.get("violations", [])))
-    if codeql_enabled:
-        findings.extend(Finding(**{**item, "source": "codeql"}) for item in codeql.get("findings", []))
-        findings.extend(
-            semantic_changes_to_findings(
-                codeql.get("comparison", {}).get("semantic", {}).get("changes", [])
-            )
-        )
+    findings.extend(semantic_changes_to_findings(java_analysis.get("findings", [])))
 
     raw_finding_data = [dataclasses.asdict(finding) for finding in findings]
     active_finding_data, suppressed_findings = partition_findings(
@@ -2228,7 +2047,7 @@ def main(argv: list[str]) -> int:
         "business_contract_check": business_contract_check,
         "manual_review_obligations": manual_review_obligations,
         "audit_coverage": audit_coverage,
-        "codeql": codeql,
+        "java_analysis": java_analysis,
         "findings": active_finding_data,
         "suppressed_findings": suppressed_findings,
         "suppression_summary": summarize_suppressed(suppressed_findings),
@@ -2254,13 +2073,10 @@ def main(argv: list[str]) -> int:
         print(f"未检查业务契约数：{len(business_contract_check['unchecked_contracts'])}。")
     if audit_coverage.get("status") != "success":
         print(f"审计覆盖质量闸门：{audit_coverage.get('status')}，{audit_coverage.get('message')}")
-    print(f"CodeQL 状态：{codeql['status']}，{codeql['message']}")
-    if args.require_codeql and codeql["status"] != "success":
-        print("CodeQL 是本次检查的必需项，但未成功完成。", file=sys.stderr)
+    print(f"Java 语义分析状态：{java_analysis['status']}，{java_analysis['message']}")
+    if args.java_analysis == "required" and java_analysis["status"] != "success":
+        print("Java 语义分析是本次检查的必需项，但未成功完成。", file=sys.stderr)
         return 3
-    if args.require_codeql_compare and codeql.get("comparison", {}).get("status") != "success":
-        print("CodeQL baseline/target 对比是本次检查的必需项，但未成功完成。", file=sys.stderr)
-        return 4
     return 0
 
 

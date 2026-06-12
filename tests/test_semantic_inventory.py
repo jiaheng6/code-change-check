@@ -213,9 +213,9 @@ class SemanticInventoryTest(unittest.TestCase):
                 }
             ],
         }
-        codeql = {
+        spoon = {
             "status": "success",
-            "engine": "codeql",
+            "engine": "spoon",
             "items": [
                 {
                     "kind": "call",
@@ -224,7 +224,7 @@ class SemanticInventoryTest(unittest.TestCase):
                     "symbol": "OrderClient.create",
                     "argument_count": 2,
                     "arguments": [],
-                    "engine": "codeql",
+                    "engine": "spoon",
                 },
                 {
                     "kind": "call",
@@ -233,12 +233,12 @@ class SemanticInventoryTest(unittest.TestCase):
                     "symbol": "HiddenClient.call",
                     "argument_count": 1,
                     "arguments": [],
-                    "engine": "codeql",
+                    "engine": "spoon",
                 },
             ],
         }
 
-        merged = self.semantic.merge_semantic_inventories(lightweight, codeql)
+        merged = self.semantic.merge_semantic_inventories(lightweight, spoon)
 
         self.assertEqual(len(merged["items"]), 2)
         order = next(item for item in merged["items"] if item["symbol"] == "OrderClient.create")
@@ -252,15 +252,15 @@ class SemanticInventoryTest(unittest.TestCase):
             "errors": ["src/hidden.ts: 无法读取"],
             "items": [],
         }
-        codeql = {
+        spoon = {
             "status": "success",
-            "engine": "codeql",
-            "message": "CodeQL 查询完成",
+            "engine": "spoon",
+            "message": "Spoon 查询完成",
             "errors": [],
             "items": [],
         }
 
-        merged = self.semantic.merge_semantic_inventories(lightweight, codeql)
+        merged = self.semantic.merge_semantic_inventories(lightweight, spoon)
 
         self.assertEqual(merged["status"], "partial-failure")
 

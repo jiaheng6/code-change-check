@@ -341,7 +341,7 @@ def assess_audit_coverage(
     *,
     changes: dict,
     contract_check: dict,
-    codeql: dict,
+    java_analysis: dict,
     role_issues: list[dict],
     missing_referenced_artifacts: list[dict],
     manual_review_obligations: list[dict],
@@ -390,12 +390,41 @@ def assess_audit_coverage(
                 "message": "当前为无 baseline 的全量扫描，无法区分本次迭代新增问题与历史问题。",
             }
         )
-    if codeql.get("enabled") and codeql.get("status") != "success":
+    java_status = java_analysis.get("status", "disabled")
+    java_coverage = java_analysis.get("coverage", {})
+    if java_status == "blocked" or (
+        int(java_coverage.get("java_files_total", 0)) > 0
+        and int(java_coverage.get("java_files_parsed", 0)) == 0
+    ):
         reasons.append(
             {
-                "code": "codeql-incomplete",
+                "code": "java-analysis-blocked",
+                "severity": "blocked",
+                "message": "Java 核心语义分析未成功解析任何目标文件。",
+            }
+        )
+    elif java_status == "partial" or not java_coverage.get("core_complete", True):
+        reasons.append(
+            {
+                "code": "java-analysis-partial",
                 "severity": "partial",
-                "message": f"CodeQL 状态为 {codeql.get('status', 'unknown')}，深度分析未完整完成。",
+                "message": "Java 核心语义分析存在未解析文件或其他覆盖缺口。",
+            }
+        )
+    if not java_coverage.get("graph_complete", True):
+        reasons.append(
+            {
+                "code": "code-graph-incomplete",
+                "severity": "partial",
+                "message": "调用链和影响范围分析未完整完成。",
+            }
+        )
+    if not java_coverage.get("comparison_complete", True):
+        reasons.append(
+            {
+                "code": "java-comparison-incomplete",
+                "severity": "partial",
+                "message": "baseline/target Java 业务语义比较未完整完成。",
             }
         )
     status = "success"
@@ -454,15 +483,6 @@ def build_plan_review(plan: dict) -> dict:
                 "code": "input-role-conflict",
                 "severity": "critical",
                 "message": f"发现 {len(roles['issues'])} 个期望契约与实际响应快照角色冲突。",
-            }
-        )
-    codeql_enabled = bool(plan.get("codeql") or plan.get("require_codeql") or plan.get("require_codeql_compare"))
-    if codeql_enabled and plan.get("codeql_build_mode") == "none" and has_java_build_file(project):
-        warnings.append(
-            {
-                "code": "java-build-mode-none",
-                "severity": "high",
-                "message": "Maven/Gradle Java 项目显式使用 CodeQL build-mode=none，可能导致建库失败；应使用自动模式或 autobuild。",
             }
         )
     return {

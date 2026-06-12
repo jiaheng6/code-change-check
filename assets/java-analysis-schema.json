@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Java 语义分析证据",
+  "type": "object",
+  "required": ["status", "coverage", "evidence", "errors"],
+  "properties": {
+    "status": {"enum": ["success", "partial", "blocked"]},
+    "coverage": {"type": "object"},
+    "evidence": {"type": "array"},
+    "errors": {"type": "array"}
+  }
+}

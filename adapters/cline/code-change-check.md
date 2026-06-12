@@ -1,91 +1,15 @@
-# 代码变更检查
+# Cline：code-change-check
 
-当用户要求检查 AI 或人工完成的代码变更、分析 Git/SVN/目录快照、核对需求实现、发现业务逻辑误解、内部寻址错误、权限遗漏、状态流转错误或第三方对接风险时，使用 `code-change-check` 流程。
+当用户要求审查 Java 代码变更时：
 
-优先读取技能目录中的文件：
-
-- `SKILL.md`
-- `references/workflow.md`
-- `references/risk-rules.md`
-- `references/business-contracts.md`
-- `references/codeql.md`
-- `references/adapters.md`
-
-需要提取证据时，运行：
+1. 先运行 `run-code-change-check.cmd --project . --print-context`。
+2. 在聊天中确认实际项目根目录、Git/SVN/快照范围、需求材料和业务契约来源。
+3. 检测到 Java 文件后自动运行 Java 语义分析，不询问是否启用。
+4. 使用显式参数和 `--no-interactive` 生成审计计划，展示计划并获得用户确认后执行。
+5. 优先解读字段映射、调用参数、寻址、guard、状态条件、调用链、受影响测试和覆盖质量闸门。
 
 ```bash
-path/to/code-change-check/run-code-change-check.cmd --project . --output code-change-check-output
+run-code-change-check.cmd --project selected-root --base-ref main --target-ref HEAD --contract-source existing-code --java-analysis auto --no-interactive --save-audit-plan code-change-check-audit-plan.json
+run-code-change-check.cmd --confirm-audit-plan code-change-check-audit-plan.json
+run-code-change-check.cmd --audit-plan code-change-check-audit-plan.json
 ```
-
-没有显式变动范围时，根目录启动器默认进入交互向导。自动化场景或已明确参数时，追加 `--no-interactive`。
-
-如果当前环境没有可交互 TTY，禁止直接执行审计命令。先运行 `--print-context`，识别 Git/SVN 根目录；如果当前目录是 SVN 工作副本子目录，先询问用户审计当前子目录还是 SVN 工作副本根目录，再询问变动范围、业务契约来源和是否启用 CodeQL。
-
-确认后先用 `--save-audit-plan` 生成计划，展示给用户；用户确认后执行 `--confirm-audit-plan`，最后使用 `--audit-plan` 运行。只选择部分需求或契约时，追加 `--strict-spec` 或 `--strict-contract`。
-
-PowerShell 可使用：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File path/to/code-change-check/run-code-change-check.ps1 --project . --output code-change-check-output
-```
-
-macOS/Linux 可使用：
-
-```bash
-sh path/to/code-change-check/run-code-change-check.sh --project . --output code-change-check-output
-```
-
-如果用户没有明确给出版本范围，优先使用交互式提交选择：
-
-```bash
-path/to/code-change-check/run-code-change-check.cmd --project . --interactive --output code-change-check-output
-```
-
-交互模式支持方向键移动、空格多选、回车提交、`q` 取消。
-
-如果发现需求、设计或任务文档，交互模式会继续让用户把每个提交关联到对应需求/任务。用户明确不需要时追加 `--no-map-requirements`。
-
-交互模式还会让用户选择业务契约来源：
-
-- 使用指定契约文件。
-- 从迭代前旧代码自动提取。
-- 两者都用。
-- 本次不使用业务契约。
-
-旧代码候选契约必须让用户确认后再用于审计。用户明确不需要确认时追加 `--no-confirm-contracts`。
-
-交互模式会询问是否启用 CodeQL。非交互模式需要显式使用：
-
-```bash
-path/to/code-change-check/run-code-change-check.cmd --project . --codeql --output code-change-check-output
-```
-
-当用户要求 CodeQL 必须完成时使用 `--require-codeql`。CodeQL 不可用或执行失败时，该模式必须返回失败状态。
-
-CodeQL 默认尝试 baseline/target 对比。需要关闭时追加 `--no-codeql-compare`；当用户要求对比必须成功时追加 `--require-codeql-compare`。启用 CodeQL 后还会生成业务语义清单差异；CodeQL CLI 不可用时使用轻量提取器降级。
-
-如果用户提供需求、设计或任务文档，使用：
-
-```bash
-path/to/code-change-check/run-code-change-check.cmd --project . --spec docs/spec.md --output code-change-check-output
-```
-
-如果用户指定 Git 或 SVN 迭代范围，使用：
-
-```bash
-path/to/code-change-check/run-code-change-check.cmd --project . --base-ref main --target-ref HEAD --output code-change-check-output
-path/to/code-change-check/run-code-change-check.cmd --project . --svn-revision 100:120 --output code-change-check-output
-```
-
-输出必须包含：
-
-- 总体结论。
-- 高风险清单。
-- 人工优先阅读位置。
-- 文件、行号和风险原因。
-- 需要补充的测试或运行验证。
-- 需求、设计、任务和代码之间的缺口。
-- 需求-提交映射缺口。
-- 业务契约来源、候选契约和启用契约。
-- 业务契约执行结果和违反项。
-- CodeQL 状态、分析语言、数据库缓存状态、baseline/target 对比状态、差异命中和业务语义差异。

@@ -329,7 +329,7 @@ class ContractRulesIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.tool = load_module("code_change_check")
 
-    def test_main_merges_contract_violations_into_evidence_and_report_without_codeql(self):
+    def test_main_merges_contract_violations_into_evidence_and_report_without_spoon(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             project = root / "project"
@@ -403,7 +403,7 @@ class ContractRulesIntegrationTest(unittest.TestCase):
                     "file",
                     "--response-snapshot",
                     str(response),
-                    "--no-codeql",
+                    "--java-analysis", "off",
                     "--no-interactive",
                     "--output",
                     str(output),
@@ -455,7 +455,7 @@ class ContractRulesIntegrationTest(unittest.TestCase):
                     "--contract-source",
                     "file",
                     "--scan-all",
-                    "--no-codeql",
+                    "--java-analysis", "off",
                     "--no-interactive",
                     "--output",
                     str(output),
@@ -500,7 +500,7 @@ class ContractRulesIntegrationTest(unittest.TestCase):
                     "--response-snapshot",
                     str(response),
                     "--scan-all",
-                    "--no-codeql",
+                    "--java-analysis", "off",
                     "--no-interactive",
                     "--output",
                     str(output),

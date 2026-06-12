@@ -93,7 +93,7 @@ class FindingFilterIntegrationTest(unittest.TestCase):
                     str(project),
                     "--scan-all",
                     "--no-contract",
-                    "--no-codeql",
+                    "--java-analysis", "off",
                     "--no-interactive",
                     "--output",
                     str(output),

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "java_analyzer": {
+    "version": "1.0.0",
+    "bundled_path": "tools/java-analyzer/dist/java-analyzer.jar"
+  },
+  "portable_java": {
+    "version": "17.0.14+7",
+    "platforms": {
+      "windows-x64": {
+        "url": "https://aka.ms/download-jdk/microsoft-jdk-17.0.14-windows-x64.zip",
+        "algorithm": "sha256",
+        "digest": "3619082f4a667f52c97cce983364a517993f798ae248c411765becfd9705767f",
+        "archive_format": "zip",
+        "entrypoint": "jdk-17.0.14+7/bin/java.exe",
+        "bundled_path": "offline-runtimes/portable-java/bin/java.exe"
+      }
+    }
+  },
+  "code_graph": {
+    "version": "0.9.9",
+    "platforms": {
+      "windows-x64": {
+        "url": "https://github.com/colbymchenry/codegraph/releases/download/v0.9.9/codegraph-win32-x64.zip",
+        "algorithm": "sha256",
+        "digest": "793826dc97851415e846733ce1c54afb70e8e9ce3bcb5616ea7728bf3cfc88ee",
+        "archive_format": "zip",
+        "entrypoint": "codegraph-win32-x64/bin/codegraph.cmd",
+        "bundled_path": "offline-runtimes/code-graph/bin/codegraph.cmd"
+      },
+      "linux-x64": {
+        "url": "https://github.com/colbymchenry/codegraph/releases/download/v0.9.9/codegraph-linux-x64.tar.gz",
+        "algorithm": "sha256",
+        "digest": "c40ee80bce2d354c874befe5ece996281cb46cf083004372d36fd8a7238b59fb",
+        "archive_format": "tar.gz",
+        "entrypoint": "codegraph-linux-x64/bin/codegraph",
+        "bundled_path": "offline-runtimes/code-graph/bin/codegraph"
+      },
+      "macos-arm64": {
+        "url": "https://github.com/colbymchenry/codegraph/releases/download/v0.9.9/codegraph-darwin-arm64.tar.gz",
+        "algorithm": "sha256",
+        "digest": "266ee038c52946e96ee222843fc6f3e44d351341ed98f11f5277bdfce9880ca5",
+        "archive_format": "tar.gz",
+        "entrypoint": "codegraph-darwin-arm64/bin/codegraph",
+        "bundled_path": "offline-runtimes/code-graph/bin/codegraph"
+      }
+    }
+  }
+}

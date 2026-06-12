@@ -1,5 +1,0 @@
-name: code-change-check/java-semantic
-version: 0.1.0
-description: code-change-check Java/Kotlin 语义清单查询
-dependencies:
-  codeql/java-all: "*"

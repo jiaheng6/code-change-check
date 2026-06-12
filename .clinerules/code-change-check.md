@@ -1,9 +1,3 @@
-# 代码变更检查
+# code-change-check
 
-本仓库是 `code-change-check` 技能包。处理本仓库任务时：
-
-- 所有成果物使用中文简体，必要技术名、变量名和命令除外。
-- 修改技能行为时，优先更新 `SKILL.md`。
-- 修改确定性检查逻辑时，优先更新 `scripts/code_change_check.py`。
-- 修改审计规则说明时，优先更新 `references/risk-rules.md`。
-- 完成后运行 `python scripts/code_change_check.py --project . --output code-change-check-output --scan-all` 做自检。
+审查 Java 代码变更时，先确认版本范围、需求材料和业务契约来源，再通过已确认审计计划执行。Java 语义分析默认自动运行，不调用目标项目构建流程。最终结论必须基于可追溯证据，并遵守 `blocked` 与 `partial` 覆盖质量闸门。

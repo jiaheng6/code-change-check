@@ -1,44 +1,16 @@
-# 三个目标工具的适配方式
+# AI 编程工具适配
 
-## Claude Code
+## Claude Code 与 Codex
 
-将仓库复制或克隆到：
-
-```text
-~/.claude/skills/code-change-check/
-```
-
-目录内必须包含 `SKILL.md`，脚本和参考文件保持相对路径不变。
-
-Windows 用户优先运行根目录的 `run-code-change-check.cmd` 或 `run-code-change-check.ps1`。macOS/Linux 用户优先运行 `run-code-change-check.sh`。启动器会检测 Python 3.10+，没有时会给出中文安装提示。没有显式变动范围时，启动器默认进入交互向导；自动化场景追加 `--no-interactive`。
-
-Claude Code 的 `/code-change-check` 触发后，禁止直接执行审计命令。先运行：
-
-```bash
-path/to/code-change-check/run-code-change-check.cmd --project . --print-context
-```
-
-如果返回 SVN 工作副本根目录和当前目录不同，先在聊天里问用户审计当前子目录还是 SVN 工作副本根目录。随后继续问变动范围、业务契约来源和是否启用 CodeQL，确认后再用 `--no-interactive` 加显式参数运行。
-
-确认结果不能直接拼接成最终审计命令。必须先使用 `--save-audit-plan` 生成计划，展示给用户；用户确认后执行 `--confirm-audit-plan`，最后只使用 `--audit-plan` 运行。用户只选择部分需求或契约时，必须追加 `--strict-spec` 或 `--strict-contract`。
-
-## Codex
-
-将仓库复制或克隆到：
-
-```text
-~/.codex/skills/code-change-check/
-```
-
-Codex 会根据 `SKILL.md` 的 `name` 和 `description` 触发技能。
+无 TTY 环境中，先通过聊天确认根目录、迭代范围、需求材料和契约来源，再使用显式参数加 `--no-interactive`。建议使用独立审查对话，避免开发上下文影响结论。
 
 ## Cline
 
-Cline 使用 `.clinerules/` 规则。将 `adapters/cline/code-change-check.md` 复制到目标项目：
+使用 `adapters/cline/code-change-check.md` 或 `.clinerules/code-change-check.md`。
 
-```text
-<project>/.clinerules/code-change-check.md
-```
+所有适配入口必须遵守：
 
-该规则只负责触发和指向本技能目录，实际检查仍由 `scripts/code_change_check.py` 完成。
-Windows 用户优先通过 `run-code-change-check.cmd` 或 `run-code-change-check.ps1` 间接调用脚本；macOS/Linux 用户优先通过 `run-code-change-check.sh` 间接调用脚本。没有显式变动范围时，启动器默认进入交互向导；自动化场景追加 `--no-interactive`。
+- Java 分析自动执行，不询问是否启用。
+- 不调用目标项目构建工具。
+- 审计计划确认后才能执行。
+- `blocked` 禁止给出安全结论。

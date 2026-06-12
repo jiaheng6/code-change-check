@@ -1,5 +1,0 @@
-name: code-change-check/javascript-semantic
-version: 0.1.0
-description: code-change-check JavaScript/TypeScript 语义清单查询
-dependencies:
-  codeql/javascript-all: "*"
