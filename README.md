@@ -38,6 +38,8 @@
 - **明确区分“未检查”和“通过”**：缺少实际响应快照、无法执行的契约或不可用的 CodeQL 不会被当作通过。
 - **风险降噪但不丢证据**：测试、文档、调试日志和 fixture 中的文本命中默认移入已抑制线索区，生产风险更突出，原始证据仍保留在 JSON 证据包中。
 - **baseline/target 对比**：CodeQL 和轻量语义分析都关注迭代前后差异，帮助区分新增问题、历史问题和已消失问题。
+- **审计覆盖质量闸门**：自动识别 0% 契约覆盖、文档引用但未纳入的 JSON 契约、期望契约/实际响应角色冲突、无 baseline 全量扫描和 CodeQL 未完成等限制，阻止低证据审计被误解为通过。
+- **未检查契约反查代码**：无法自动执行的自然语言契约会生成必须人工核验任务，并根据接口名、方法名和字段名定位候选实现位置。
 
 ## 适用场景
 
@@ -178,11 +180,12 @@ flowchart TD
     H --> I["执行业务契约检查"]
     H --> J["执行可选 CodeQL baseline/target 对比"]
     H --> K["执行文本规则并对证据降噪"]
-    I --> L["汇总 JSON 证据包与 Markdown 报告"]
+    I --> L["计算审计覆盖质量闸门并生成人工核验任务"]
     J --> L
     K --> L
-    L --> M["优先阅读高风险、结构化差异和未检查项"]
-    M --> N["人工判断、补充测试并修复"]
+    L --> M["汇总 JSON 证据包与 Markdown 报告"]
+    M --> N["优先阅读高风险、结构化差异和未检查项"]
+    N --> O["人工判断、补充测试并修复"]
 ```
 
 ## 快速开始
@@ -292,6 +295,8 @@ path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/
 ```
 
 没有传入匹配的实际响应快照时，JSON 契约会显示在“未检查契约”中，不会用“0 违反”暗示已经通过。
+
+期望契约 JSON 和实际响应快照职责不同。不得把同一文件或内容完全相同的复制文件同时传给 `--contract` 和 `--response-snapshot`；工具会拒绝比较并将审计覆盖质量闸门标记为 `blocked`。
 
 ### 查看全部支持文件文本线索
 
@@ -404,6 +409,8 @@ JSON 证据包包含完整结构化数据，适合继续交给 AI 或脚本做�
 | 响应快照 | 某个接口实际返回的 JSON 样本，用来和 JSON 响应契约做字段路径及稳定值对比。 |
 | 语义清单 / 语义差异 | 从代码中提取的调用、寻址、字段和状态等结构化线索，以及它们在迭代前后的变化。 |
 | 审计计划 | 执行前锁定的审计参数集合，包括项目目录、迭代范围、需求、契约来源和 CodeQL 选项。确认后如果参数变化，需要重新确认。 |
+| 审计覆盖质量闸门 | 对审计证据是否足以支撑结论的判断。`blocked` 表示不能据此建议合并或声称未发现风险，`partial` 表示结论必须附带覆盖限制。 |
+| 人工核验任务 | 针对无法自动执行的契约生成的检查任务，包含契约来源、未检查原因、反查标识符和候选代码位置。 |
 
 ## 和普通 diff 工具的区别
 
@@ -430,7 +437,7 @@ python -m unittest discover -s tests -p "test_*.py"
 编译检查：
 
 ```bash
-python -m py_compile scripts/audit_plan.py scripts/finding_filter.py scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
+python -m py_compile scripts/audit_coverage.py scripts/audit_plan.py scripts/finding_filter.py scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
 ```
 
 Skill 校验：

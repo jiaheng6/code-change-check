@@ -21,6 +21,13 @@ class SkillInstructionsTest(unittest.TestCase):
         self.assertIn("--strict-spec", content)
         self.assertIn("--response-snapshot", content)
         self.assertIn("--include-support-findings", content)
+        self.assertIn("审计覆盖质量闸门", content)
+        self.assertIn("必须人工核验", content)
+        self.assertIn("期望契约", content)
+        self.assertIn("实际响应快照", content)
+        self.assertIn("不得把同一文件", content)
+        self.assertIn("Maven/Gradle", content)
+        self.assertIn("autobuild", content)
 
     def test_readme_explains_installation_workflow_and_terms(self):
         content = (ROOT / "README.md").read_text(encoding="utf-8")

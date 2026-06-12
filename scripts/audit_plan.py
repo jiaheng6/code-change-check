@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from audit_coverage import build_plan_review
+
 
 AUDIT_PLAN_VERSION = 1
 AUDIT_PLAN_FIELDS = [
@@ -74,6 +76,7 @@ def build_audit_plan(args: argparse.Namespace) -> dict:
     plan["rules"] = resolve_path(args.rules)
     plan["output"] = resolve_path(args.output)
     plan["codeql_cache"] = resolve_path(args.codeql_cache, project)
+    plan.update(build_plan_review(plan))
     return plan
 
 

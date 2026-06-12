@@ -24,6 +24,12 @@ from contract_rules import evaluate_contracts
 from codeql_comparison import run_codeql_review
 from semantic_inventory import extract_semantic_inventory, extract_text_inventory
 from audit_plan import apply_audit_plan, build_audit_plan, confirm_audit_plan, load_audit_plan, save_audit_plan
+from audit_coverage import (
+    assess_audit_coverage,
+    build_manual_review_obligations,
+    discover_referenced_json_artifacts,
+    validate_contract_snapshot_roles,
+)
 from finding_filter import partition_findings, summarize_suppressed
 
 
@@ -1549,6 +1555,7 @@ def make_report(data: dict) -> str:
         if audit_plan.get("confirmed")
         else "未使用已确认审计计划"
     )
+    audit_coverage = data.get("audit_coverage", {})
 
     lines = [
         "# 代码变更检查报告",
@@ -1576,6 +1583,66 @@ def make_report(data: dict) -> str:
             lines.append(f"- `{severity}`：{count}")
     else:
         lines.append("- 未发现内置风险命中。")
+
+    lines.extend(["", "## 审计覆盖质量闸门", ""])
+    lines.append(f"- 状态：`{audit_coverage.get('status', 'unknown')}`")
+    lines.append(f"- 说明：{audit_coverage.get('message', '')}")
+    lines.append(f"- 自动契约覆盖率：{audit_coverage.get('contract_coverage_percent', 100)}%")
+    lines.append(f"- 必须人工核验任务数：{audit_coverage.get('manual_review_obligation_count', 0)}")
+    for reason in audit_coverage.get("reasons", []):
+        lines.append(
+            f"- `{reason.get('severity', '')}` `{reason.get('code', '')}` {reason.get('message', '')}"
+        )
+    if not audit_coverage.get("reasons"):
+        lines.append("- 未发现当前规则支持的审计覆盖缺口。")
+
+    role_issues = data.get("input_role_issues", [])
+    lines.extend(["", "### 输入角色冲突", ""])
+    if role_issues:
+        for issue in role_issues:
+            lines.append(
+                f"- `{issue.get('type', '')}` 期望契约 `{issue.get('contract_file', '')}`；"
+                f"实际响应快照 `{issue.get('snapshot_file', '')}`。{issue.get('message', '')}"
+            )
+    else:
+        lines.append("- 无。")
+
+    missing_artifacts = data.get("missing_referenced_contract_artifacts", [])
+    lines.extend(["", "### 文档引用但未纳入的契约材料", ""])
+    if missing_artifacts:
+        for item in missing_artifacts[:100]:
+            lines.append(
+                f"- `{item.get('path', '')}`，引用自 `{item.get('source_file', '')}`，"
+                f"原始引用 `{item.get('reference', '')}`。"
+            )
+    else:
+        lines.append("- 无。")
+
+    obligations = data.get("manual_review_obligations", [])
+    lines.extend(["", "## 必须人工核验的未检查契约", ""])
+    if obligations:
+        for obligation in obligations[:100]:
+            lines.append(
+                f"### `{obligation.get('priority', '')}` `{obligation.get('contract_id', '')}` "
+                f"`{obligation.get('file', '')}:L{obligation.get('line', 1)}`"
+            )
+            lines.append("")
+            lines.append(f"- 契约：{obligation.get('contract_text', '')}")
+            lines.append(f"- 未检查原因：{obligation.get('reason', '')}")
+            lines.append(f"- 反查标识符：{', '.join(obligation.get('tokens', [])) or '无'}")
+            candidates = obligation.get("candidates", [])
+            if candidates:
+                lines.append("- 候选实现位置：")
+                for candidate in candidates:
+                    lines.append(
+                        f"  - `{candidate.get('file', '')}:L{candidate.get('line', 1)}` "
+                        f"命中 `{', '.join(candidate.get('tokens', []))}`：`{candidate.get('snippet', '')}`"
+                    )
+            else:
+                lines.append("- 候选实现位置：未自动定位，必须人工搜索契约涉及的接口或字段。")
+            lines.append("")
+    else:
+        lines.append("- 无。")
 
     lines.extend(["", "### 已抑制文本线索", ""])
     if suppressed_findings:
@@ -2035,16 +2102,47 @@ def main(argv: list[str]) -> int:
         if should_confirm_contracts
         else contract_candidates
     )
+    contract_files = (
+        discover_contract_files(project, args.contract, strict=args.strict_contract)
+        if contract_source in {"file", "both"}
+        else []
+    )
+    response_snapshot_files = expand_explicit_files(project, args.response_snapshot, {".json"})
+    role_validation = validate_contract_snapshot_roles(
+        [path for path in contract_files if path.suffix.lower() == ".json"],
+        response_snapshot_files,
+    )
     target_inventory = None
     if business_contracts:
         target_inventory = codeql_target_inventory(codeql) if codeql_enabled else None
         if target_inventory is None:
             target_inventory = extract_semantic_inventory(project)
-    response_snapshots = load_response_snapshots(project, args.response_snapshot)
+    response_snapshots = load_response_snapshots(
+        project,
+        [str(path) for path in role_validation["valid_snapshot_files"]],
+    )
     business_contract_check = evaluate_contracts(
         business_contracts,
         target_inventory,
         response_snapshots,
+    )
+    referenced_artifacts = discover_referenced_json_artifacts(
+        project,
+        spec_files + [path for path in contract_files if path.suffix.lower() == ".md"],
+        contract_files,
+    )
+    manual_review_obligations = build_manual_review_obligations(
+        project,
+        business_contract_check.get("unchecked_contracts", []),
+        business_contracts,
+    )
+    audit_coverage = assess_audit_coverage(
+        changes=changes,
+        contract_check=business_contract_check,
+        codeql=codeql,
+        role_issues=role_validation["issues"],
+        missing_referenced_artifacts=referenced_artifacts["missing"],
+        manual_review_obligations=manual_review_obligations,
     )
     findings = scan_files(project, changes["changed_files"], args.scan_all, patterns)
     findings.extend(contract_violations_to_findings(business_contract_check.get("violations", [])))
@@ -2079,7 +2177,13 @@ def main(argv: list[str]) -> int:
         "contract_candidates": contract_candidates,
         "business_contracts": business_contracts,
         "response_snapshots": response_snapshots,
+        "input_role_issues": role_validation["issues"],
+        "referenced_contract_artifacts": referenced_artifacts["referenced"],
+        "missing_referenced_contract_artifacts": referenced_artifacts["missing"],
+        "unresolved_contract_references": referenced_artifacts["unresolved"],
         "business_contract_check": business_contract_check,
+        "manual_review_obligations": manual_review_obligations,
+        "audit_coverage": audit_coverage,
         "codeql": codeql,
         "findings": active_finding_data,
         "suppressed_findings": suppressed_findings,
@@ -2104,6 +2208,8 @@ def main(argv: list[str]) -> int:
         print(f"已抑制文本线索数：{len(suppressed_findings)}，完整证据已写入 JSON。")
     if business_contract_check.get("unchecked_contracts"):
         print(f"未检查业务契约数：{len(business_contract_check['unchecked_contracts'])}。")
+    if audit_coverage.get("status") != "success":
+        print(f"审计覆盖质量闸门：{audit_coverage.get('status')}，{audit_coverage.get('message')}")
     print(f"CodeQL 状态：{codeql['status']}，{codeql['message']}")
     if args.require_codeql and codeql["status"] != "success":
         print("CodeQL 是本次检查的必需项，但未成功完成。", file=sys.stderr)

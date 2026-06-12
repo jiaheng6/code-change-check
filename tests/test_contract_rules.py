@@ -421,6 +421,100 @@ class ContractRulesIntegrationTest(unittest.TestCase):
         self.assertIn("data.list[]", difference["missing"])
         self.assertIn("结构化差异", report)
 
+    def test_main_reports_blocked_coverage_and_manual_review_for_unchecked_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "backend"
+            output = root / "output"
+            spec = root / "openspec" / "changes" / "selected" / "proposal.md"
+            referenced_contract = root / "docs" / "api-mock-backup" / "safetyInspection.json"
+            source = project / "src" / "OverviewServiceImpl.java"
+            source.parent.mkdir(parents=True)
+            spec.parent.mkdir(parents=True)
+            referenced_contract.parent.mkdir(parents=True)
+            source.write_text(
+                'class OverviewServiceImpl { void safetyInspection() { result.put("handleRate", value); } }\n',
+                encoding="utf-8",
+            )
+            spec.write_text(
+                "/safetyInspection 的 handleRate 字段必须兼容，响应与 `docs/api-mock-backup/*.json` 一致。\n",
+                encoding="utf-8",
+            )
+            referenced_contract.write_text('{"data":{"handleRate":{"label":"事件处置率"}}}\n', encoding="utf-8")
+
+            exit_code = self.tool.main(
+                [
+                    "--project",
+                    str(project),
+                    "--spec",
+                    str(spec),
+                    "--strict-spec",
+                    "--contract",
+                    str(spec),
+                    "--strict-contract",
+                    "--contract-source",
+                    "file",
+                    "--scan-all",
+                    "--no-codeql",
+                    "--no-interactive",
+                    "--output",
+                    str(output),
+                ]
+            )
+            evidence = json.loads(
+                (output / "code-change-check-evidence.json").read_text(encoding="utf-8")
+            )
+            report = (output / "code-change-check-report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(evidence["audit_coverage"]["status"], "blocked")
+        self.assertEqual(len(evidence["missing_referenced_contract_artifacts"]), 1)
+        obligation = evidence["manual_review_obligations"][0]
+        self.assertEqual(obligation["candidates"][0]["file"], "src/OverviewServiceImpl.java")
+        self.assertIn("## 审计覆盖质量闸门", report)
+        self.assertIn("## 必须人工核验的未检查契约", report)
+        self.assertIn("OverviewServiceImpl.java", report)
+
+    def test_main_does_not_compare_contract_against_same_content_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            output = root / "output"
+            contract = project / "contracts" / "safetyInspection.json"
+            response = project / "responses" / "safetyInspection.json"
+            contract.parent.mkdir(parents=True)
+            response.parent.mkdir(parents=True)
+            content = '{"data":{"handleRate":{"label":"事件处置率"}}}\n'
+            contract.write_text(content, encoding="utf-8")
+            response.write_text(content, encoding="utf-8")
+
+            exit_code = self.tool.main(
+                [
+                    "--project",
+                    str(project),
+                    "--contract",
+                    str(contract),
+                    "--strict-contract",
+                    "--contract-source",
+                    "file",
+                    "--response-snapshot",
+                    str(response),
+                    "--scan-all",
+                    "--no-codeql",
+                    "--no-interactive",
+                    "--output",
+                    str(output),
+                ]
+            )
+            evidence = json.loads(
+                (output / "code-change-check-evidence.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(evidence["business_contract_check"]["checked_contracts"], 0)
+        self.assertEqual(evidence["audit_coverage"]["status"], "blocked")
+        self.assertEqual(evidence["input_role_issues"][0]["type"], "same-content")
+
 
 if __name__ == "__main__":
     unittest.main()

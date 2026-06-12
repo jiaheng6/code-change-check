@@ -38,6 +38,8 @@ Typical problems include:
 - **Unchecked is not passed**: missing response snapshots, non-executable contracts, and unavailable CodeQL runs are reported explicitly instead of being treated as successful.
 - **Risk noise suppression without losing evidence**: text matches from tests, docs, debug logs, and fixtures move to a suppressed evidence section by default while remaining in the JSON evidence bundle.
 - **Baseline/target comparison**: CodeQL and lightweight semantic analysis focus on before/after differences to separate new, existing, and resolved issues.
+- **Audit coverage quality gate**: detects zero contract coverage, referenced-but-missing JSON contracts, expected/actual input role conflicts, full scans without a baseline, and incomplete CodeQL analysis so weak evidence is not mistaken for a pass.
+- **Code lookup for unchecked contracts**: converts non-executable natural-language contracts into mandatory manual review tasks and locates candidate implementations from endpoint, method, and field identifiers.
 
 ## When To Use It
 
@@ -180,11 +182,12 @@ flowchart TD
     H --> I["Run business contract checks"]
     H --> J["Run optional CodeQL baseline/target comparison"]
     H --> K["Run text rules and suppress low-confidence evidence"]
-    I --> L["Generate JSON evidence and Markdown report"]
+    I --> L["Assess audit coverage and generate manual review tasks"]
     J --> L
     K --> L
-    L --> M["Prioritize risks, structured differences, and unchecked items"]
-    M --> N["Apply human judgment, tests, and fixes"]
+    L --> M["Generate JSON evidence and Markdown report"]
+    M --> N["Prioritize risks, structured differences, and unchecked items"]
+    N --> O["Apply human judgment, tests, and fixes"]
 ```
 
 ## Quick Start
@@ -294,6 +297,8 @@ path/to/code-change-check/run-code-change-check.cmd --project . --contract docs/
 ```
 
 Without a matching response snapshot, the JSON contract is reported as unchecked instead of implying that zero violations means it passed.
+
+Expected contract JSON and actual response snapshots have different roles. Do not pass the same file, or an identical copy, to both `--contract` and `--response-snapshot`; the tool rejects the comparison and marks audit coverage as `blocked`.
 
 ### Include Support-File Text Findings
 
@@ -406,6 +411,8 @@ The JSON evidence bundle contains the complete structured data and is suitable f
 | Response snapshot | An actual JSON response sample used to compare field paths and stable values with a JSON response contract. |
 | Semantic inventory / difference | Structured clues extracted from code, such as calls, addressing, fields, and states, plus their before/after changes. |
 | Audit plan | The locked set of execution inputs, including project directory, iteration scope, requirements, contract source, and CodeQL options. Parameter changes require reconfirmation. |
+| Audit coverage quality gate | A judgment of whether the available evidence can support the conclusion. `blocked` forbids merge recommendations or no-risk claims; `partial` requires explicit coverage limitations. |
+| Manual review obligation | A task generated for a contract that cannot be executed automatically, including its source, reason, lookup identifiers, and candidate code locations. |
 
 ## How It Differs From A Diff Reader
 
@@ -432,7 +439,7 @@ python -m unittest discover -s tests -p "test_*.py"
 Compile scripts:
 
 ```bash
-python -m py_compile scripts/audit_plan.py scripts/finding_filter.py scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
+python -m py_compile scripts/audit_coverage.py scripts/audit_plan.py scripts/finding_filter.py scripts/code_change_check.py scripts/codeql_support.py scripts/codeql_comparison.py scripts/semantic_inventory.py scripts/codeql_semantic.py scripts/contract_rules.py
 ```
 
 Validate the Skill:

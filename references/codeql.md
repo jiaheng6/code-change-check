@@ -9,7 +9,7 @@
 - 自动检测项目语言和 CodeQL CLI 已安装的 extractor。
 - 可靠构造 baseline/target 源代码，为每种语言创建独立 database，执行标准 code-scanning query suite。
 - 将 SARIF 结果转换为统一风险项，并合并到 JSON 证据包和 Markdown 报告。
-- Java-only、JavaScript/TypeScript、Python 等默认使用 `none`；检测到 Kotlin、Go 或 Swift 时默认使用 `autobuild`。
+- Maven/Gradle Java、Kotlin、Go 或 Swift 默认使用 `autobuild`；没有构建文件的纯 Java、JavaScript/TypeScript、Python 等默认使用 `none`。
 - 将 CodeQL 命中分为新增、已有和已消失。只有两端分析都成功时才生成差异分类。
 - 对 baseline/target 提取并比较业务语义清单，当前覆盖调用参数、内部/外部寻址、租户字段和状态字段。
 - 轻量语义提取器作为降级基础；CodeQL 可用时，运行仓库内置自定义查询补充 Java/Kotlin 和 JavaScript/TypeScript 调用清单。

@@ -181,6 +181,52 @@ class AuditPlanTest(unittest.TestCase):
         self.assertTrue(evidence["audit_plan"]["effective"]["confirmation_hash"])
         self.assertIn("已确认审计计划", report)
 
+    def test_audit_plan_warns_about_missing_referenced_contracts_and_unsafe_modes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "backend"
+            spec = root / "openspec" / "changes" / "selected"
+            contract = root / "docs" / "api-mock-backup" / "safetyInspection.json"
+            project.mkdir()
+            spec.mkdir(parents=True)
+            contract.parent.mkdir(parents=True)
+            (project / "pom.xml").write_text("<project />\n", encoding="utf-8")
+            (spec / "proposal.md").write_text(
+                "响应必须与 `docs/api-mock-backup/*.json` 完全一致。\n",
+                encoding="utf-8",
+            )
+            contract.write_text('{"data": {}}\n', encoding="utf-8")
+            args = self.tool.parse_args(
+                [
+                    "--project",
+                    str(project),
+                    "--spec",
+                    str(spec),
+                    "--strict-spec",
+                    "--contract",
+                    str(spec),
+                    "--strict-contract",
+                    "--contract-source",
+                    "file",
+                    "--scan-all",
+                    "--codeql",
+                    "--codeql-build-mode",
+                    "none",
+                    "--no-interactive",
+                ]
+            )
+
+            plan = self.tool.build_audit_plan(args)
+
+        warning_codes = {item["code"] for item in plan["review_warnings"]}
+        self.assertIn("full-scan-no-baseline", warning_codes)
+        self.assertIn("missing-referenced-contract-artifacts", warning_codes)
+        self.assertIn("java-build-mode-none", warning_codes)
+        self.assertEqual(
+            plan["missing_referenced_contract_artifacts"][0]["path"],
+            str(contract.resolve()),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
