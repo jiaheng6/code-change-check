@@ -25,7 +25,22 @@ path/to/code-change-check/run-code-change-check.cmd --project . --print-context
 4. 必须询问业务契约来源：指定契约文件、从迭代前旧代码提取、两者都用或不使用。
 5. 必须询问是否启用 CodeQL；如果用户启用但本机未安装 CodeQL CLI，必须询问是否需要安装说明，不能把 CodeQL 缺失解释为检查通过。
 
-Claude Code、Cline 或其他无 TTY 环境确认完毕后，运行命令时追加 `--no-interactive`，并显式传入用户确认过的 `--project`、`--base-ref` / `--svn-revision` / `--scan-all`、`--contract-source` 和 `--codeql` / `--no-codeql`。
+Claude Code、Cline 或其他无 TTY 环境确认完毕后，禁止直接执行最终审计。必须把用户选择编译成审计计划，展示计划内容，得到用户确认后再执行：
+
+```bash
+# 1. 生成计划，不执行审计
+path/to/code-change-check/run-code-change-check.cmd --project selected-code-root --spec selected-spec-dir --strict-spec --contract selected-contract-dir --strict-contract --contract-source file --scan-all --codeql --no-interactive --output code-change-check-output --save-audit-plan code-change-check-audit-plan.json
+
+# 2. 用户确认计划内容后，标记计划已确认
+path/to/code-change-check/run-code-change-check.cmd --confirm-audit-plan code-change-check-audit-plan.json
+
+# 3. 只通过已确认计划执行
+path/to/code-change-check/run-code-change-check.cmd --audit-plan code-change-check-audit-plan.json
+```
+
+`--project` 必须使用用户实际选择的代码审计目录，不能因为当前 shell 位于父目录就继续传 `--project .`。用户只选择部分需求或契约时，必须使用 `--strict-spec` 或 `--strict-contract`，禁止重新自动发现未选择的文档。详细流程见 `references/audit-plan.md`。
+
+如果 `--print-context` 返回 `svn-incompatible`，禁止静默当作无版本控制目录继续。必须告知用户 SVN 客户端无法读取工作副本；只有用户明确选择目录快照时才追加 `--scan-all`，或提供 `--baseline`。
 
 ## 工作流
 
@@ -76,6 +91,14 @@ path/to/code-change-check/run-code-change-check.cmd --project . --interactive --
 
 ```bash
 path/to/code-change-check/run-code-change-check.cmd --project . --no-interactive --output code-change-check-output
+```
+
+生成、确认和执行审计计划：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project . --scan-all --no-contract --no-codeql --no-interactive --save-audit-plan code-change-check-audit-plan.json
+path/to/code-change-check/run-code-change-check.cmd --confirm-audit-plan code-change-check-audit-plan.json
+path/to/code-change-check/run-code-change-check.cmd --audit-plan code-change-check-audit-plan.json
 ```
 
 如果项目中能发现需求、设计或任务文档，交互模式会继续让用户把每个提交关联到对应需求/任务。需要跳过时使用：

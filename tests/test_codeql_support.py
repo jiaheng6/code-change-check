@@ -72,6 +72,16 @@ class CodeQLSupportTest(unittest.TestCase):
         self.assertEqual(java_mode, "none")
         self.assertEqual(kotlin_mode, "autobuild")
 
+    def test_detect_default_build_mode_uses_autobuild_for_maven_java(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            (project / "pom.xml").write_text("<project />\n", encoding="utf-8")
+            (project / "App.java").write_text("class App {}\n", encoding="utf-8")
+
+            mode = self.codeql.detect_default_build_mode(project, "java-kotlin")
+
+        self.assertEqual(mode, "autobuild")
+
     def test_run_codeql_analysis_reuses_successful_database_cache(self):
         commands = []
 

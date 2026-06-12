@@ -252,6 +252,24 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["id"], "C2")
 
+    def test_strict_contract_discovery_only_uses_explicit_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            selected = project / "docs" / "selected"
+            selected.mkdir(parents=True)
+            (selected / "api.json").write_text('{"ok": true}\n', encoding="utf-8")
+            ignored = project / "contracts"
+            ignored.mkdir()
+            (ignored / "ignored.md").write_text("必须忽略\n", encoding="utf-8")
+
+            files = self.tool.discover_contract_files(
+                project,
+                [str(selected)],
+                strict=True,
+            )
+
+        self.assertEqual([path.name for path in files], ["api.json"])
+
 
 if __name__ == "__main__":
     unittest.main()

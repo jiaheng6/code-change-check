@@ -152,6 +152,26 @@ class InteractiveSelectionTest(unittest.TestCase):
         self.assertEqual(mappings[0]["requirements"][0]["id"], "R2")
         self.assertEqual(mappings[0]["requirements"][0]["line"], 9)
 
+    def test_strict_spec_discovery_only_uses_explicit_directory(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            selected = project / "openspec" / "changes" / "selected"
+            selected.mkdir(parents=True)
+            (selected / "proposal.md").write_text("# 选中\n", encoding="utf-8")
+            ignored = project / "openspec" / "changes" / "ignored"
+            ignored.mkdir(parents=True)
+            (ignored / "proposal.md").write_text("# 忽略\n", encoding="utf-8")
+
+            files = self.tool.discover_spec_files(
+                project,
+                [str(selected)],
+                strict=True,
+            )
+
+        self.assertEqual([path.parent.name for path in files], ["selected"])
+
 
 if __name__ == "__main__":
     unittest.main()

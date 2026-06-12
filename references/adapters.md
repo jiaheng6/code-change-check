@@ -20,6 +20,8 @@ path/to/code-change-check/run-code-change-check.cmd --project . --print-context
 
 如果返回 SVN 工作副本根目录和当前目录不同，先在聊天里问用户审计当前子目录还是 SVN 工作副本根目录。随后继续问变动范围、业务契约来源和是否启用 CodeQL，确认后再用 `--no-interactive` 加显式参数运行。
 
+确认结果不能直接拼接成最终审计命令。必须先使用 `--save-audit-plan` 生成计划，展示给用户；用户确认后执行 `--confirm-audit-plan`，最后只使用 `--audit-plan` 运行。用户只选择部分需求或契约时，必须追加 `--strict-spec` 或 `--strict-contract`。
+
 ## Codex
 
 将仓库复制或克隆到：

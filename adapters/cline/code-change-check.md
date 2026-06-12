@@ -21,6 +21,8 @@ path/to/code-change-check/run-code-change-check.cmd --project . --output code-ch
 
 如果当前环境没有可交互 TTY，禁止直接执行审计命令。先运行 `--print-context`，识别 Git/SVN 根目录；如果当前目录是 SVN 工作副本子目录，先询问用户审计当前子目录还是 SVN 工作副本根目录，再询问变动范围、业务契约来源和是否启用 CodeQL。
 
+确认后先用 `--save-audit-plan` 生成计划，展示给用户；用户确认后执行 `--confirm-audit-plan`，最后使用 `--audit-plan` 运行。只选择部分需求或契约时，追加 `--strict-spec` 或 `--strict-contract`。
+
 PowerShell 可使用：
 
 ```powershell

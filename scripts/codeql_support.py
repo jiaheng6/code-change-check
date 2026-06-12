@@ -242,6 +242,9 @@ def detect_default_build_mode(project: Path, language: str) -> str:
     if language in {"go", "swift"}:
         return "autobuild"
     if language == "java-kotlin":
+        build_files = {"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"}
+        if any(path.is_file() and path.name in build_files for path in project.rglob("*")):
+            return "autobuild"
         for path in project.rglob("*"):
             if path.is_file() and path.suffix.lower() in {".kt", ".kts"} and not should_skip(path.relative_to(project)):
                 return "autobuild"

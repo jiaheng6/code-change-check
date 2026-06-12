@@ -23,6 +23,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from contract_rules import evaluate_contracts
 from codeql_comparison import run_codeql_review
 from semantic_inventory import extract_semantic_inventory, extract_text_inventory
+from audit_plan import apply_audit_plan, build_audit_plan, confirm_audit_plan, load_audit_plan, save_audit_plan
 
 
 TEXT_EXTENSIONS = {
@@ -441,6 +442,39 @@ def is_svn_repo(project: Path) -> bool:
     return svn_working_copy_root(project) is not None
 
 
+def find_svn_metadata_root(project: Path) -> Path | None:
+    current = project.resolve()
+    candidate = None
+    while True:
+        if (current / ".svn").exists():
+            candidate = current
+        elif candidate is not None:
+            break
+        if current.parent == current:
+            break
+        current = current.parent
+    return candidate
+
+
+def probe_svn_working_copy(project: Path) -> dict:
+    code, output = run_command(["svn", "info", "--show-item", "wc-root"], project)
+    if code == 0 and output.strip():
+        return {"status": "svn", "root": Path(output.strip()).resolve(), "detail": ""}
+
+    fallback_code, fallback_output = run_command(["svn", "info"], project)
+    if fallback_code == 0:
+        parsed = parse_svn_info(fallback_output)
+        root = parsed.get("Working Copy Root Path")
+        if root:
+            return {"status": "svn", "root": Path(root).resolve(), "detail": ""}
+
+    metadata_root = find_svn_metadata_root(project)
+    if metadata_root is not None:
+        detail = fallback_output or output
+        return {"status": "svn-incompatible", "root": metadata_root, "detail": detail}
+    return {"status": "none", "root": None, "detail": fallback_output or output}
+
+
 def is_relative_to_path(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
@@ -465,8 +499,9 @@ def detect_repository_context(project: Path) -> dict:
             else "当前目录是 Git 工作树子目录，请先确认审计当前目录还是 Git 工作树根目录。",
         }
 
-    svn_root = svn_working_copy_root(project_path)
-    if svn_root is not None:
+    svn_probe = probe_svn_working_copy(project_path)
+    svn_root = svn_probe["root"]
+    if svn_probe["status"] == "svn" and svn_root is not None:
         is_root = project_path == svn_root
         return {
             "vcs": "svn",
@@ -478,6 +513,17 @@ def detect_repository_context(project: Path) -> dict:
             if is_root
             else "当前目录是 SVN 工作副本子目录，请先确认审计当前目录还是 SVN 工作副本根目录。",
         }
+    if svn_probe["status"] == "svn-incompatible" and svn_root is not None:
+        is_root = project_path == svn_root
+        return {
+            "vcs": "svn-incompatible",
+            "project": str(project_path),
+            "root": str(svn_root),
+            "project_is_vcs_root": is_root,
+            "recommended_project": str(svn_root),
+            "message": "检测到 SVN 元数据，但当前 SVN 客户端无法读取该工作副本。请先确认是否升级工作副本或降级为目录快照审计。",
+            "detail": svn_probe["detail"],
+        }
 
     return {
         "vcs": "none",
@@ -487,6 +533,18 @@ def detect_repository_context(project: Path) -> dict:
         "recommended_project": str(project_path),
         "message": "当前目录未检测到 Git 或 SVN 工作副本，建议使用目录快照或显式指定项目根目录。",
     }
+
+
+def validate_repository_context_for_run(context: dict, args: argparse.Namespace) -> str | None:
+    if context.get("vcs") != "svn-incompatible":
+        return None
+    if args.scan_all or args.baseline:
+        return None
+    return (
+        "检测到 SVN 元数据，但当前 SVN 客户端无法读取工作副本。"
+        "请先使用 --print-context 查看详情，并显式选择 --scan-all 目录快照审计、提供 --baseline，"
+        "或在用户确认后处理 SVN 客户端兼容问题。"
+    )
 
 
 def normalize_relative(path: Path, root: Path) -> str:
@@ -809,14 +867,29 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def discover_spec_files(project: Path, explicit_specs: list[str]) -> list[Path]:
+def expand_explicit_files(project: Path, entries: list[str], suffixes: set[str]) -> list[Path]:
     result: list[Path] = []
-    for spec in explicit_specs:
-        path = Path(spec)
+    for entry in entries:
+        path = Path(entry)
         if not path.is_absolute():
             path = project / path
-        if path.exists() and path.is_file():
-            result.append(path)
+        candidates = [path] if path.exists() else list(project.glob(entry))
+        for candidate in candidates:
+            if candidate.is_file() and candidate.suffix.lower() in suffixes:
+                result.append(candidate)
+            elif candidate.is_dir():
+                result.extend(
+                    item
+                    for item in candidate.rglob("*")
+                    if item.is_file() and item.suffix.lower() in suffixes
+                )
+    return sorted({path.resolve() for path in result}, key=lambda path: path.as_posix())
+
+
+def discover_spec_files(project: Path, explicit_specs: list[str], strict: bool = False) -> list[Path]:
+    result = expand_explicit_files(project, explicit_specs, {".md"})
+    if strict:
+        return result
 
     seen = {p.resolve() for p in result}
     for pattern in SPEC_GLOBS:
@@ -943,14 +1016,10 @@ def choose_contract_source() -> str:
     return resolve_contract_source_selection(selected)
 
 
-def discover_contract_files(project: Path, explicit_contracts: list[str]) -> list[Path]:
-    result: list[Path] = []
-    for contract in explicit_contracts:
-        path = Path(contract)
-        if not path.is_absolute():
-            path = project / path
-        if path.exists() and path.is_file():
-            result.append(path)
+def discover_contract_files(project: Path, explicit_contracts: list[str], strict: bool = False) -> list[Path]:
+    result = expand_explicit_files(project, explicit_contracts, {".md", ".json", ".yaml", ".yml"})
+    if strict:
+        return result
 
     seen = {p.resolve() for p in result}
     for pattern in CONTRACT_GLOBS:
@@ -1142,6 +1211,7 @@ def collect_business_contracts(
     source: str,
     explicit_contracts: list[str],
     changes: dict,
+    strict_contract: bool = False,
 ) -> tuple[str, list[dict]]:
     if source == "interactive":
         source = choose_contract_source()
@@ -1150,7 +1220,7 @@ def collect_business_contracts(
 
     contracts = []
     if source in {"file", "both"}:
-        contract_files = discover_contract_files(project, explicit_contracts)
+        contract_files = discover_contract_files(project, explicit_contracts, strict=strict_contract)
         contracts.extend(extract_contracts_from_files(project, contract_files))
     if source in {"existing-code", "both"}:
         if resolve_previous_revision(project, changes) is not None:
@@ -1384,12 +1454,19 @@ def make_report(data: dict) -> str:
     sorted_findings = sorted(findings, key=lambda item: (severity_rank(item.severity), item.file, item.line))
     summary = data["summary"]
     changes = data["changes"]
+    audit_plan = data.get("audit_plan", {})
+    audit_plan_summary = (
+        f"已确认审计计划 `{audit_plan.get('path', '')}`"
+        if audit_plan.get("confirmed")
+        else "未使用已确认审计计划"
+    )
 
     lines = [
         "# 代码变更检查报告",
         "",
         f"- 生成时间：{data['generated_at']}",
         f"- 项目路径：`{data['project']}`",
+        f"- 执行计划：{audit_plan_summary}",
         f"- 变更来源：`{changes['source']}`",
         f"- 变更范围：`{changes.get('range', '')}`",
         f"- 变更文件数：{len(changes['changed_files'])}",
@@ -1659,7 +1736,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--map-requirements", action="store_true", help="为选中的提交交互式关联需求/任务")
     parser.add_argument("--no-map-requirements", action="store_true", help="交互模式下跳过需求-提交映射")
     parser.add_argument("--spec", action="append", default=[], help="需求、设计或任务文档，可重复传入")
+    parser.add_argument("--strict-spec", action="store_true", help="只使用显式指定的需求、设计或任务文档")
     parser.add_argument("--contract", action="append", default=[], help="业务契约文件，可重复传入")
+    parser.add_argument("--strict-contract", action="store_true", help="只使用显式指定的业务契约文件")
     parser.add_argument(
         "--contract-source",
         choices=["interactive", "file", "existing-code", "both", "none"],
@@ -1692,6 +1771,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
     parser.add_argument("--print-context", action="store_true", help="输出项目版本控制上下文后退出，供 AI 适配器预检")
+    parser.add_argument("--audit-plan", help="从已确认的审计计划 JSON 执行")
+    parser.add_argument("--save-audit-plan", help="把当前显式参数保存为审计计划 JSON 后退出")
+    parser.add_argument("--confirm-audit-plan", help="确认审计计划 JSON，确认后才能通过计划执行")
     return parser.parse_args(argv)
 
 
@@ -1719,6 +1801,25 @@ def apply_default_interactive(args: argparse.Namespace, stdin=None, stdout=None)
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    loaded_audit_plan = None
+    audit_plan_path = ""
+    if args.confirm_audit_plan:
+        try:
+            plan_path = Path(args.confirm_audit_plan).resolve()
+            confirm_audit_plan(plan_path)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"无法确认审计计划：{error}", file=sys.stderr)
+            return 2
+        print(f"已确认审计计划：{plan_path}")
+        return 0
+    if args.audit_plan:
+        try:
+            audit_plan_path = str(Path(args.audit_plan).resolve())
+            loaded_audit_plan = load_audit_plan(Path(audit_plan_path))
+            apply_audit_plan(args, loaded_audit_plan)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"无法加载审计计划：{error}", file=sys.stderr)
+            return 2
     apply_default_interactive(args)
     project = Path(args.project).resolve()
     baseline = Path(args.baseline).resolve() if args.baseline else None
@@ -1727,11 +1828,20 @@ def main(argv: list[str]) -> int:
     if not project.exists() or not project.is_dir():
         print(f"项目目录不存在：{project}", file=sys.stderr)
         return 2
+    if args.save_audit_plan:
+        plan_path = Path(args.save_audit_plan).resolve()
+        save_audit_plan(plan_path, build_audit_plan(args))
+        print(f"已生成审计计划：{plan_path}")
+        return 0
     if args.print_context:
         print(json.dumps(detect_repository_context(project), ensure_ascii=False, indent=2))
         return 0
     if baseline is not None and (not baseline.exists() or not baseline.is_dir()):
         print(f"baseline 目录不存在：{baseline}", file=sys.stderr)
+        return 2
+    repository_context_error = validate_repository_context_for_run(detect_repository_context(project), args)
+    if repository_context_error:
+        print(repository_context_error, file=sys.stderr)
         return 2
 
     rules_path = Path(args.rules).resolve() if args.rules else None
@@ -1762,7 +1872,7 @@ def main(argv: list[str]) -> int:
             cache_root=cache_root,
         )
         maybe_prompt_codeql_installation(args, codeql)
-    spec_files = discover_spec_files(project, args.spec)
+    spec_files = discover_spec_files(project, args.spec, strict=args.strict_spec)
     specs = extract_spec_summary(project, spec_files)
     requirement_items = build_requirement_items(specs)
     should_map_requirements = (
@@ -1784,6 +1894,7 @@ def main(argv: list[str]) -> int:
         contract_source,
         args.contract,
         changes,
+        strict_contract=args.strict_contract,
     )
     should_confirm_contracts = (
         bool(contract_candidates)
@@ -1811,9 +1922,15 @@ def main(argv: list[str]) -> int:
             )
         )
 
+    effective_audit_plan = dict(loaded_audit_plan) if loaded_audit_plan else build_audit_plan(args)
     data = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "project": str(project),
+        "audit_plan": {
+            "path": audit_plan_path,
+            "confirmed": bool(loaded_audit_plan and loaded_audit_plan.get("confirmed")),
+            "effective": effective_audit_plan,
+        },
         "changes": changes,
         "specs": specs,
         "requirement_items": requirement_items,

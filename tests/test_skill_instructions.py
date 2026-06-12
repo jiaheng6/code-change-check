@@ -15,6 +15,10 @@ class SkillInstructionsTest(unittest.TestCase):
         self.assertIn("禁止直接执行", content)
         self.assertIn("先在聊天里向用户确认", content)
         self.assertIn("SVN 工作副本根目录", content)
+        self.assertIn("--save-audit-plan", content)
+        self.assertIn("--confirm-audit-plan", content)
+        self.assertIn("--audit-plan", content)
+        self.assertIn("--strict-spec", content)
 
 
 if __name__ == "__main__":

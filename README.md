@@ -182,6 +182,22 @@ path/to/code-change-check/run-code-change-check.cmd --project . --print-context
 
 该命令只输出 JSON，不生成报告。Claude Code、Cline 等无 TTY 环境应先用它识别 Git/SVN 根目录；如果当前目录是 SVN 工作副本子目录，先询问用户检查当前子目录还是 SVN 工作副本根目录。
 
+如果输出 `vcs=svn-incompatible`，表示检测到 SVN 元数据，但当前 SVN 客户端无法读取工作副本。工具不会静默降级；只有明确选择 `--scan-all` 或提供 `--baseline` 后才会继续。
+
+### 使用已确认审计计划
+
+无 TTY 环境推荐先生成计划，再确认和执行：
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project backend --spec ../openspec/changes/change-a --strict-spec --contract ../docs/contracts --strict-contract --contract-source file --scan-all --codeql --no-interactive --output code-change-check-output --save-audit-plan code-change-check-audit-plan.json
+path/to/code-change-check/run-code-change-check.cmd --confirm-audit-plan code-change-check-audit-plan.json
+path/to/code-change-check/run-code-change-check.cmd --audit-plan code-change-check-audit-plan.json
+```
+
+未确认计划会被拒绝执行；计划确认后发生任何参数修改，也必须重新确认。证据包和 Markdown 报告会记录计划路径、确认状态和实际生效参数。
+
+`--spec` 和 `--contract` 支持文件或目录。使用 `--strict-spec`、`--strict-contract` 后，只读取显式指定的文件或目录，不再自动发现其他文档。
+
 ### 指定 Git 迭代范围
 
 ```bash

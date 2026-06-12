@@ -184,6 +184,22 @@ path/to/code-change-check/run-code-change-check.cmd --project . --print-context
 
 This prints JSON only and does not generate a report. Claude Code, Cline, and other non-TTY environments should use it first to detect the Git/SVN root. If the current directory is an SVN working-copy subdirectory, ask whether to review the current subdirectory or the SVN working-copy root.
 
+If the output contains `vcs=svn-incompatible`, SVN metadata was found but the current SVN client cannot read the working copy. The tool will not silently fall back; continue only after explicitly selecting `--scan-all` or providing `--baseline`.
+
+### Use A Confirmed Audit Plan
+
+For non-TTY environments, generate, confirm, and execute an audit plan:
+
+```bash
+path/to/code-change-check/run-code-change-check.cmd --project backend --spec ../openspec/changes/change-a --strict-spec --contract ../docs/contracts --strict-contract --contract-source file --scan-all --codeql --no-interactive --output code-change-check-output --save-audit-plan code-change-check-audit-plan.json
+path/to/code-change-check/run-code-change-check.cmd --confirm-audit-plan code-change-check-audit-plan.json
+path/to/code-change-check/run-code-change-check.cmd --audit-plan code-change-check-audit-plan.json
+```
+
+Unconfirmed plans are rejected. Any parameter change after confirmation requires the plan to be confirmed again. The evidence bundle and Markdown report record the plan path, confirmation status, and effective arguments.
+
+`--spec` and `--contract` accept files or directories. With `--strict-spec` and `--strict-contract`, only explicitly supplied inputs are used.
+
 ### Review A Git Range
 
 ```bash
