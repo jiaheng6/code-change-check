@@ -2067,7 +2067,7 @@ def main(argv: list[str]) -> int:
     json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已生成证据包：{json_path}")
 
-    report_format = getattr(args, "format", "all")
+    report_format = args.format
     if report_format in ("md", "all"):
         report_path = output / "report.md"
         report_path.write_text(make_report(data), encoding="utf-8")

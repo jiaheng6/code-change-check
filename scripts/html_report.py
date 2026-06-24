@@ -78,7 +78,7 @@ details summary:hover { color: #2563eb; }
 .mermaid { margin: 1rem 0; }
 """
 
-_MERMAID_SCRIPT = '<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>'
+_MERMAID_SCRIPT = '<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" integrity="sha384-EnYhRnB3MO+yzNoHB7mRdKXTBn9lREOHjk3OP1k39vMz2BrgLPI2SH/fMKynHayq" crossorigin="anonymous"></script>'
 _MERMAID_INIT = "<script>mermaid.initialize({startOnLoad:true});</script>"
 
 
@@ -125,7 +125,7 @@ def _findings_section(findings: list[dict], limit: int = 200) -> str:
     severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     sorted_findings = sorted(
         findings,
-        key=lambda f: (severity_rank.get(f.get("severity", ""), 4), f.get("file", ""), f.get("line", 0)),
+        key=lambda f: (severity_rank.get(f.get("severity", ""), 4), f.get("file", ""), f.get("line", 1)),
     )
     lines = []
     for finding in sorted_findings[:limit]:
@@ -133,7 +133,7 @@ def _findings_section(findings: list[dict], limit: int = 200) -> str:
         lines.append(f'<div class="finding-card {_esc(severity)}">')
         lines.append(f'  <strong>{_badge(severity)} {_esc(finding.get("title", ""))}</strong>')
         lines.append(f'  <ul class="meta-list">')
-        lines.append(f'    <li>位置：<code>{_esc(finding.get("file", ""))}:{finding.get("line", 0)}</code></li>')
+        lines.append(f'    <li>位置：<code>{_esc(finding.get("file", ""))}:{finding.get("line", 1)}</code></li>')
         lines.append(f'    <li>类型：{_esc(finding.get("category", ""))}</li>')
         lines.append(f'    <li>原因：{_esc(finding.get("message", ""))}</li>')
         lines.append(f'    <li>代码：<code>{_esc(finding.get("snippet", ""))}</code></li>')
@@ -159,7 +159,7 @@ def _changed_files_section(changed_files: list[str]) -> str:
 def _mermaid_section(mermaid_code: str) -> str:
     if not mermaid_code.strip():
         return ""
-    return f'<div class="mermaid">\n{_esc(mermaid_code.strip())}\n</div>'
+    return f'<div class="mermaid">\n{mermaid_code.strip()}\n</div>'
 
 
 def _contracts_section(contracts: list[dict]) -> str:
