@@ -36,7 +36,7 @@ class JavaAnalysisMainIntegrationTest(unittest.TestCase):
             exit_code = self.tool.main([
                 "--project", str(project), "--scan-all", "--no-contract", "--no-interactive", "--output", str(output)
             ])
-            evidence = json.loads((output / "code-change-check-evidence.json").read_text(encoding="utf-8"))
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(evidence["java_analysis"]["target"]["core"]["status"], "success")
@@ -53,7 +53,7 @@ class JavaAnalysisMainIntegrationTest(unittest.TestCase):
             exit_code = self.tool.main([
                 "--project", str(project), "--scan-all", "--no-contract", "--no-interactive", "--output", str(output)
             ])
-            evidence = json.loads((output / "code-change-check-evidence.json").read_text(encoding="utf-8"))
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(evidence["java_analysis"]["status"], "disabled")
