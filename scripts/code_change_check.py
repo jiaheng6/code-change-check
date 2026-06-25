@@ -21,6 +21,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from contract_rules import evaluate_contracts
+from html_report import make_html_report
 from java_analysis import disabled_java_analysis_result, run_java_analysis
 from semantic_inventory import extract_text_inventory
 from audit_plan import apply_audit_plan, build_audit_plan, confirm_audit_plan, load_audit_plan, save_audit_plan
@@ -1844,6 +1845,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--tool-cache", help="指定 Java 分析运行时和辅助工具缓存目录")
     parser.add_argument("--offline", action="store_true", help="离线模式，不自动下载任何运行时")
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
+    parser.add_argument(
+        "--format",
+        choices=["md", "html", "all"],
+        default="all",
+        help="报告输出格式：md、html 或 all（默认 all，同时生成 MD 和 HTML）",
+    )
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
     parser.add_argument("--include-support-findings", action="store_true", help="把测试、文档、调试和 fixture 文本命中纳入正式风险")
     parser.add_argument("--response-snapshot", action="append", default=[], help="用于 JSON 契约结构化对比的实际响应快照，可重复传入")
@@ -2056,13 +2063,19 @@ def main(argv: list[str]) -> int:
     }
 
     output.mkdir(parents=True, exist_ok=True)
-    json_path = output / "code-change-check-evidence.json"
-    report_path = output / "code-change-check-report.md"
+    json_path = output / "evidence.json"
     json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    report_path.write_text(make_report(data), encoding="utf-8")
-
     print(f"已生成证据包：{json_path}")
-    print(f"已生成报告：{report_path}")
+
+    report_format = args.format
+    if report_format in ("md", "all"):
+        report_path = output / "report.md"
+        report_path.write_text(make_report(data), encoding="utf-8")
+        print(f"已生成 Markdown 报告：{report_path}")
+    if report_format in ("html", "all"):
+        html_path = output / "report.html"
+        html_path.write_text(make_html_report(data), encoding="utf-8")
+        print(f"已生成 HTML 报告：{html_path}")
     if findings:
         print(f"风险命中数：{len(findings)}")
     else:

@@ -352,8 +352,8 @@ class ContractRulesIntegrationTest(unittest.TestCase):
                 ]
             )
 
-            evidence = (output / "code-change-check-evidence.json").read_text(encoding="utf-8")
-            report = (output / "code-change-check-report.md").read_text(encoding="utf-8")
+            evidence = (output / "evidence.json").read_text(encoding="utf-8")
+            report = (output / "report.md").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertIn("contract:contract-addressing", evidence)
@@ -410,9 +410,9 @@ class ContractRulesIntegrationTest(unittest.TestCase):
                 ]
             )
             evidence = json.loads(
-                (output / "code-change-check-evidence.json").read_text(encoding="utf-8")
+                (output / "evidence.json").read_text(encoding="utf-8")
             )
-            report = (output / "code-change-check-report.md").read_text(encoding="utf-8")
+            report = (output / "report.md").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(evidence["business_contract_check"]["checked_contracts"], 1)
@@ -462,9 +462,9 @@ class ContractRulesIntegrationTest(unittest.TestCase):
                 ]
             )
             evidence = json.loads(
-                (output / "code-change-check-evidence.json").read_text(encoding="utf-8")
+                (output / "evidence.json").read_text(encoding="utf-8")
             )
-            report = (output / "code-change-check-report.md").read_text(encoding="utf-8")
+            report = (output / "report.md").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(evidence["audit_coverage"]["status"], "blocked")
@@ -507,7 +507,7 @@ class ContractRulesIntegrationTest(unittest.TestCase):
                 ]
             )
             evidence = json.loads(
-                (output / "code-change-check-evidence.json").read_text(encoding="utf-8")
+                (output / "evidence.json").read_text(encoding="utf-8")
             )
 
         self.assertEqual(exit_code, 0)

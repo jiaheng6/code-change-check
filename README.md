@@ -138,8 +138,9 @@ flowchart TD
 
 ```text
 code-change-check-output/
-├── code-change-check-evidence.json
-└── code-change-check-report.md
+├── evidence.json
+├── report.md
+└── report.html
 ```
 
 报告重点包含：
