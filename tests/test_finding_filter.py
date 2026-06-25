@@ -102,7 +102,7 @@ class FindingFilterIntegrationTest(unittest.TestCase):
             evidence = json.loads(
                 (output / "evidence.json").read_text(encoding="utf-8")
             )
-            report = (output / "report.md").read_text(encoding="utf-8")
+            report = (output / "report.html").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertEqual({item["file"] for item in evidence["findings"]}, {"src/app.ts"})
@@ -112,6 +112,7 @@ class FindingFilterIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(evidence["summary"]["by_severity"]["critical"], 1)
         self.assertEqual(evidence["suppression_summary"]["total"], 3)
+        self.assertFalse((output / "report.md").exists())
         self.assertIn("已抑制文本线索", report)
 
 

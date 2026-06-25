@@ -15,6 +15,7 @@ The current version provides deep semantic analysis for **Java** only.
 - Spoon `NOCLASSPATH` analysis for field mappings, call arguments, configuration sources, HTTP addresses, database writes, guards, and state conditions.
 - CodeGraph analysis for callers, callees, impact scope, and affected tests.
 - Automatic baseline/target semantic comparison.
+- A top-level delivery score matrix for requirements, tasks, and business contracts.
 - Explicit `success`, `partial`, and `blocked` audit coverage states.
 
 ## Requirements
@@ -41,4 +42,4 @@ Java analysis options:
 
 Open a fresh Claude Code or Codex conversation before each review. An independent context reduces self-review bias and keeps the development conversation focused.
 
-The report contains Java parsing coverage, semantic differences, call graph impact, affected tests, business contract results, and explicit evidence limitations.
+The default output contains `evidence.json` and `report.html`. The HTML report contains a top-level delivery score matrix, Java parsing coverage, semantic differences, call graph impact, affected tests, business contract results, and explicit evidence limitations.

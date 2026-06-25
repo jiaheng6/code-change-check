@@ -115,7 +115,7 @@ flowchart TD
     F --> G["比较 baseline/target 语义差异"]
     G --> H["执行业务契约检查"]
     H --> I["计算审计覆盖质量闸门"]
-    I --> J["生成 JSON 证据包和 Markdown 报告"]
+    I --> J["生成 JSON 证据包和 HTML 报告"]
     J --> K["AI 基于证据解读高风险项"]
 ```
 
@@ -139,12 +139,12 @@ flowchart TD
 ```text
 code-change-check-output/
 ├── evidence.json
-├── report.md
 └── report.html
 ```
 
 报告重点包含：
 
+- 顶部可交付评分矩阵，按需求、任务和业务契约展示多维度达标情况。
 - Java 文件解析覆盖率与失败原因。
 - 字段映射、参数、寻址、权限、状态和数据库写入差异。
 - 调用链、影响范围和受影响测试。

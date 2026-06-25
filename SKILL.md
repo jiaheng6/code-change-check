@@ -43,6 +43,7 @@ path/to/code-change-check/run-code-change-check.cmd --audit-plan code-change-che
 4. 优先解读：
 
 - `audit_coverage.status`
+- `delivery_assessment`
 - `java_analysis.coverage`
 - `java_analysis.comparison.changes`
 - `java_analysis.target.code_graph`

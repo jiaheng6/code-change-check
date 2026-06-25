@@ -21,6 +21,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from contract_rules import evaluate_contracts
+from delivery_assessment import build_delivery_assessment
 from html_report import make_html_report
 from java_analysis import disabled_java_analysis_result, run_java_analysis
 from semantic_inventory import extract_text_inventory
@@ -1470,344 +1471,6 @@ def build_mermaid(findings: list[Finding]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def make_report(data: dict) -> str:
-    findings = [Finding(**item) for item in data["findings"]]
-    sorted_findings = sorted(findings, key=lambda item: (severity_rank(item.severity), item.file, item.line))
-    summary = data["summary"]
-    suppressed_findings = data.get("suppressed_findings", [])
-    suppression_summary = data.get("suppression_summary", {})
-    changes = data["changes"]
-    audit_plan = data.get("audit_plan", {})
-    audit_plan_summary = (
-        f"已确认审计计划 `{audit_plan.get('path', '')}`"
-        if audit_plan.get("confirmed")
-        else "未使用已确认审计计划"
-    )
-    audit_coverage = data.get("audit_coverage", {})
-
-    lines = [
-        "# 代码变更检查报告",
-        "",
-        f"- 生成时间：{data['generated_at']}",
-        f"- 项目路径：`{data['project']}`",
-        f"- 执行计划：{audit_plan_summary}",
-        f"- 变更来源：`{changes['source']}`",
-        f"- 变更范围：`{changes.get('range', '')}`",
-        f"- 变更文件数：{len(changes['changed_files'])}",
-        f"- 需求/任务文档数：{len(data['specs'])}",
-        f"- 候选业务契约数：{len(data.get('contract_candidates', []))}",
-        f"- 启用业务契约数：{len(data.get('business_contracts', []))}",
-        f"- 风险命中数：{len(findings)}",
-        f"- 已抑制文本线索数：{len(suppressed_findings)}",
-        "",
-        "## 总览",
-        "",
-        "### 按严重程度",
-        "",
-    ]
-
-    if summary["by_severity"]:
-        for severity, count in summary["by_severity"].items():
-            lines.append(f"- `{severity}`：{count}")
-    else:
-        lines.append("- 未发现内置风险命中。")
-
-    lines.extend(["", "## 审计覆盖质量闸门", ""])
-    lines.append(f"- 状态：`{audit_coverage.get('status', 'unknown')}`")
-    lines.append(f"- 说明：{audit_coverage.get('message', '')}")
-    lines.append(f"- 自动契约覆盖率：{audit_coverage.get('contract_coverage_percent', 100)}%")
-    lines.append(f"- 必须人工核验任务数：{audit_coverage.get('manual_review_obligation_count', 0)}")
-    for reason in audit_coverage.get("reasons", []):
-        lines.append(
-            f"- `{reason.get('severity', '')}` `{reason.get('code', '')}` {reason.get('message', '')}"
-        )
-    if not audit_coverage.get("reasons"):
-        lines.append("- 未发现当前规则支持的审计覆盖缺口。")
-
-    role_issues = data.get("input_role_issues", [])
-    lines.extend(["", "### 输入角色冲突", ""])
-    if role_issues:
-        for issue in role_issues:
-            lines.append(
-                f"- `{issue.get('type', '')}` 期望契约 `{issue.get('contract_file', '')}`；"
-                f"实际响应快照 `{issue.get('snapshot_file', '')}`。{issue.get('message', '')}"
-            )
-    else:
-        lines.append("- 无。")
-
-    missing_artifacts = data.get("missing_referenced_contract_artifacts", [])
-    lines.extend(["", "### 文档引用但未纳入的契约材料", ""])
-    if missing_artifacts:
-        for item in missing_artifacts[:100]:
-            lines.append(
-                f"- `{item.get('path', '')}`，引用自 `{item.get('source_file', '')}`，"
-                f"原始引用 `{item.get('reference', '')}`。"
-            )
-    else:
-        lines.append("- 无。")
-
-    obligations = data.get("manual_review_obligations", [])
-    lines.extend(["", "## 必须人工核验的未检查契约", ""])
-    if obligations:
-        for obligation in obligations[:100]:
-            lines.append(
-                f"### `{obligation.get('priority', '')}` `{obligation.get('contract_id', '')}` "
-                f"`{obligation.get('file', '')}:L{obligation.get('line', 1)}`"
-            )
-            lines.append("")
-            lines.append(f"- 契约：{obligation.get('contract_text', '')}")
-            lines.append(f"- 未检查原因：{obligation.get('reason', '')}")
-            lines.append(f"- 反查标识符：{', '.join(obligation.get('tokens', [])) or '无'}")
-            candidates = obligation.get("candidates", [])
-            if candidates:
-                lines.append("- 候选实现位置：")
-                for candidate in candidates:
-                    lines.append(
-                        f"  - `{candidate.get('file', '')}:L{candidate.get('line', 1)}` "
-                        f"命中 `{', '.join(candidate.get('tokens', []))}`：`{candidate.get('snippet', '')}`"
-                    )
-            else:
-                lines.append("- 候选实现位置：未自动定位，必须人工搜索契约涉及的接口或字段。")
-            lines.append("")
-    else:
-        lines.append("- 无。")
-
-    lines.extend(["", "### 已抑制文本线索", ""])
-    if suppressed_findings:
-        for reason, count in suppression_summary.get("by_reason", {}).items():
-            lines.append(f"- `{reason}`：{count}")
-        lines.append("- 完整线索保留在 JSON 证据包的 `suppressed_findings` 中。")
-    else:
-        lines.append("- 无。")
-
-    lines.extend(["", "### 按风险类型", ""])
-    if summary["by_category"]:
-        for category, count in summary["by_category"].items():
-            lines.append(f"- {category}：{count}")
-    else:
-        lines.append("- 未发现内置风险命中。")
-
-    lines.extend(["", "## 变更文件", ""])
-    if changes["changed_files"]:
-        for path in changes["changed_files"][:120]:
-            lines.append(f"- `{path}`")
-        if len(changes["changed_files"]) > 120:
-            lines.append(f"- 其余 {len(changes['changed_files']) - 120} 个文件略。")
-    else:
-        lines.append("- 未从版本系统发现变更文件。")
-
-    if changes.get("selected_commits") is not None:
-        lines.extend(["", "## 本次迭代提交记录", ""])
-        if changes["selected_commits"]:
-            for commit in changes["selected_commits"]:
-                lines.append(
-                    f"- `{commit.get('short_id', commit.get('id', ''))}` {commit.get('date', '')} {commit.get('message', '')}"
-                )
-        else:
-            lines.append("- 未选择提交记录。")
-
-    lines.extend(["", "## 需求-提交映射", ""])
-    mappings = data.get("requirement_commit_mappings", [])
-    if mappings:
-        mapped_requirement_ids = set()
-        for mapping in mappings:
-            commit = mapping["commit"]
-            requirements = mapping["requirements"]
-            lines.append(
-                f"### `{commit.get('short_id', commit.get('id', ''))}` {commit.get('message', '')}"
-            )
-            if requirements:
-                for requirement in requirements:
-                    mapped_requirement_ids.add(requirement["id"])
-                    lines.append(
-                        f"- `{requirement['id']}` {requirement['kind_label']} `{requirement['file']}:L{requirement['line']}` {requirement['text']}"
-                    )
-            else:
-                lines.append("- 未关联需求或任务。")
-            lines.append("")
-
-        unmapped_requirements = [
-            requirement
-            for requirement in data.get("requirement_items", [])
-            if requirement["id"] not in mapped_requirement_ids
-        ]
-        if unmapped_requirements:
-            lines.append("### 未关联提交的需求/任务")
-            for requirement in unmapped_requirements[:50]:
-                lines.append(
-                    f"- `{requirement['id']}` {requirement['kind_label']} `{requirement['file']}:L{requirement['line']}` {requirement['text']}"
-                )
-            if len(unmapped_requirements) > 50:
-                lines.append(f"- 其余 {len(unmapped_requirements) - 50} 条略。")
-    else:
-        lines.append("- 未生成需求-提交映射。交互选择提交后可启用映射。")
-
-    lines.extend(["", "## 业务契约", ""])
-    lines.append(f"- 契约来源：`{data.get('contract_source', 'none')}`")
-    lines.append(f"- 候选契约数：{len(data.get('contract_candidates', []))}")
-    lines.append(f"- 启用契约数：{len(data.get('business_contracts', []))}")
-    business_contracts = data.get("business_contracts", [])
-    if business_contracts:
-        for contract in business_contracts[:120]:
-            lines.append(
-                f"- `{contract['id']}` `{contract['source']}` {contract['kind']} `{contract['file']}:L{contract['line']}` {contract['text']}"
-            )
-        if len(business_contracts) > 120:
-            lines.append(f"- 其余 {len(business_contracts) - 120} 条略。")
-    else:
-        lines.append("- 未启用或未提取到业务契约。")
-
-    contract_check = data.get("business_contract_check", {})
-    violations = contract_check.get("violations", [])
-    lines.extend(["", "## 业务契约执行结果", ""])
-    lines.append(f"- 状态：`{contract_check.get('status', 'disabled')}`")
-    lines.append(f"- 说明：{contract_check.get('message', '')}")
-    lines.append(f"- 启用契约总数：{contract_check.get('total_contracts', 0)}")
-    lines.append(f"- 检查契约数：{contract_check.get('checked_contracts', 0)}")
-    lines.append(f"- 未检查契约数：{len(contract_check.get('unchecked_contracts', []))}")
-    lines.append(f"- 违反契约数：{len(violations)}")
-    unchecked_contracts = contract_check.get("unchecked_contracts", [])
-    if unchecked_contracts:
-        lines.append("")
-        lines.append("未检查契约：")
-        for item in unchecked_contracts[:100]:
-            lines.append(
-                f"- `{item.get('contract_id', '')}` `{item.get('kind', '')}` "
-                f"`{item.get('file', '')}:{item.get('line', 1)}` {item.get('reason', '')}"
-            )
-    if violations:
-        for violation in violations[:100]:
-            contract = violation.get("contract", {})
-            lines.append(
-                f"- `{violation.get('severity', '')}` `{violation.get('file', '')}:{violation.get('line', 1)}` "
-                f"`{violation.get('type', '')}` {violation.get('message', '')} "
-                f"来源契约 `{contract.get('id', '')}`"
-            )
-    else:
-        lines.append("- 未发现当前规则支持的契约违反。")
-
-    differences = contract_check.get("differences", [])
-    lines.extend(["", "### 结构化差异", ""])
-    if differences:
-        for difference in differences[:100]:
-            changed = difference.get("changed", [])
-            changed_text = "；变化：" + ", ".join(
-                f"{item.get('path', '')}={item.get('actual', '')}（期望 {item.get('expected', '')}）"
-                for item in changed
-            ) if changed else ""
-            lines.append(
-                f"- `{difference.get('kind', '')}` `{difference.get('file', '')}:{difference.get('line', 1)}` "
-                f"缺失：`{', '.join(str(item) for item in difference.get('missing', [])) or '无'}`；"
-                f"新增：`{', '.join(str(item) for item in difference.get('added', [])) or '无'}`"
-                f"{changed_text}"
-            )
-    else:
-        lines.append("- 未生成结构化差异。")
-
-    java_analysis = data.get("java_analysis", disabled_java_analysis_result())
-    coverage = java_analysis.get("coverage", {})
-    core = java_analysis.get("target", {}).get("core", {})
-    graph = java_analysis.get("target", {}).get("code_graph", {})
-    comparison = java_analysis.get("comparison", {})
-    lines.extend(["", "## Java 语义分析", ""])
-    lines.append(f"- 状态：`{java_analysis.get('status', 'disabled')}`")
-    lines.append(f"- 说明：{java_analysis.get('message', '')}")
-    lines.extend(["", "## Java 分析覆盖率", ""])
-    lines.append(f"- Java 文件总数：{coverage.get('java_files_total', 0)}")
-    lines.append(f"- 成功解析：{coverage.get('java_files_parsed', 0)}")
-    lines.append(f"- 解析失败：{coverage.get('java_files_failed', 0)}")
-    lines.append(f"- 核心证据完整：{'是' if coverage.get('core_complete') else '否'}")
-    lines.append(f"- 调用图完整：{'是' if coverage.get('graph_complete') else '否'}")
-    lines.append(f"- baseline/target 比较完整：{'是' if coverage.get('comparison_complete') else '否'}")
-    if core.get("errors"):
-        lines.append("- 未解析文件或错误：")
-        for error in core["errors"][:50]:
-            lines.append(f"  - {error}")
-    lines.extend(["", "## 调用链与影响范围", ""])
-    lines.append(f"- 状态：`{graph.get('status', 'disabled')}`")
-    lines.append(f"- 调用者证据：{len(graph.get('callers', []))}")
-    lines.append(f"- 被调方法证据：{len(graph.get('callees', []))}")
-    lines.append(f"- 影响范围证据：{len(graph.get('impacts', []))}")
-    lines.append(f"- 受影响测试：{len(graph.get('affected_tests', []))}")
-    for test in graph.get("affected_tests", [])[:50]:
-        lines.append(f"  - `{test}`")
-    lines.extend(["", "## baseline/target 业务语义差异", ""])
-    lines.append(f"- 状态：`{comparison.get('status', 'disabled')}`")
-    lines.append(f"- 说明：{comparison.get('message', '')}")
-    changes = comparison.get("changes", [])
-    lines.append(f"- 语义变化数：{len(changes)}")
-    for change in changes[:100]:
-        lines.append(
-            f"- `{change.get('severity', '')}` `{change.get('file', '')}:{change.get('line', 1)}` "
-            f"`{change.get('type', '')}` {change.get('message', '')}"
-        )
-
-    lines.extend(["", "## 需求和任务线索", ""])
-    if data["specs"]:
-        for spec in data["specs"]:
-            lines.append(f"### `{spec['file']}`")
-            if spec["headings"]:
-                lines.append("")
-                lines.append("标题：")
-                for heading in spec["headings"][:12]:
-                    lines.append(f"- L{heading['line']} {heading['text']}")
-            if spec["tasks"]:
-                lines.append("")
-                lines.append("任务：")
-                for task in spec["tasks"][:20]:
-                    lines.append(f"- L{task['line']} {task['text']}")
-            if spec["key_lines"]:
-                lines.append("")
-                lines.append("关键约束线索：")
-                for key_line in spec["key_lines"][:20]:
-                    lines.append(f"- L{key_line['line']} {key_line['text']}")
-            lines.append("")
-    else:
-        lines.append("- 未自动发现需求、设计或任务文档。建议通过 `--spec` 显式指定。")
-
-    lines.extend(["", "## Mermaid 风险图", "", "```mermaid", data["mermaid"].rstrip(), "```", ""])
-
-    lines.extend(["## 人工优先阅读清单", ""])
-    if sorted_findings:
-        for finding in sorted_findings[:50]:
-            lines.append(
-                f"- `{finding.severity}` `{finding.file}:{finding.line}` {finding.title}：{finding.message}"
-            )
-    else:
-        lines.append("- 暂无命中。仍建议结合测试和业务规则做人工抽查。")
-
-    lines.extend(["", "## 详细风险命中", ""])
-    if sorted_findings:
-        for finding in sorted_findings[:200]:
-            lines.extend(
-                [
-                    f"### `{finding.severity}` {finding.title}",
-                    "",
-                    f"- 位置：`{finding.file}:{finding.line}`",
-                    f"- 类型：{finding.category}",
-                    f"- 原因：{finding.message}",
-                    f"- 代码：`{finding.snippet}`",
-                    "",
-                ]
-            )
-        if len(sorted_findings) > 200:
-            lines.append(f"其余 {len(sorted_findings) - 200} 条命中请查看 JSON 证据包。")
-    else:
-        lines.append("- 未发现详细风险命中。")
-
-    lines.extend(["", "## 建议验证", ""])
-    lines.extend(
-        [
-            "- 对 `critical` 和 `high` 位置做人工阅读。",
-            "- 对网络调用核对内外部寻址、超时、重试和鉴权。",
-            "- 对数据库写入核对事务、条件、并发和幂等。",
-            "- 对权限、状态、金额、库存相关路径补充回归测试。",
-            "- 将项目隐式规则沉淀为 `--rules` 可执行规则，降低下次误漏。",
-        ]
-    )
-
-    return "\n".join(lines) + "\n"
-
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="代码变更检查工具")
@@ -1847,9 +1510,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output", default="code-change-check-output", help="报告输出目录")
     parser.add_argument(
         "--format",
-        choices=["md", "html", "all"],
-        default="all",
-        help="报告输出格式：md、html 或 all（默认 all，同时生成 MD 和 HTML）",
+        choices=["html"],
+        default="html",
+        help="报告输出格式：当前仅生成 HTML 报告",
     )
     parser.add_argument("--scan-all", action="store_true", help="忽略变更文件限制，扫描项目内所有文本代码")
     parser.add_argument("--include-support-findings", action="store_true", help="把测试、文档、调试和 fixture 文本命中纳入正式风险")
@@ -2061,21 +1724,21 @@ def main(argv: list[str]) -> int:
         "summary": summarize_findings(findings),
         "mermaid": build_mermaid(findings),
     }
+    data["delivery_assessment"] = build_delivery_assessment(data)
 
     output.mkdir(parents=True, exist_ok=True)
     json_path = output / "evidence.json"
     json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已生成证据包：{json_path}")
 
-    report_format = args.format
-    if report_format in ("md", "all"):
-        report_path = output / "report.md"
-        report_path.write_text(make_report(data), encoding="utf-8")
-        print(f"已生成 Markdown 报告：{report_path}")
-    if report_format in ("html", "all"):
-        html_path = output / "report.html"
-        html_path.write_text(make_html_report(data), encoding="utf-8")
-        print(f"已生成 HTML 报告：{html_path}")
+    for legacy_markdown_path in (output / "report.md", output / "code-change-check-report.md"):
+        if legacy_markdown_path.is_file():
+            legacy_markdown_path.unlink()
+            print(f"已移除旧版 Markdown 报告：{legacy_markdown_path}")
+
+    html_path = output / "report.html"
+    html_path.write_text(make_html_report(data), encoding="utf-8")
+    print(f"已生成 HTML 报告：{html_path}")
     if findings:
         print(f"风险命中数：{len(findings)}")
     else:

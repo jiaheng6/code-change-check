@@ -9,6 +9,6 @@
 7. CodeGraph 提取调用链、影响范围和受影响测试。
 8. 比较 baseline/target 证据并生成高置信风险。
 9. 执行业务契约检查和覆盖质量闸门。
-10. 生成 JSON 证据包和 Markdown 报告。
+10. 生成 JSON 证据包和 HTML 报告。
 
 核心 Java 分析失败时状态为 `blocked`。调用图、baseline 或部分文件解析不完整时状态至少为 `partial`。

@@ -336,6 +336,9 @@ class ContractRulesIntegrationTest(unittest.TestCase):
             output = root / "output"
             project.mkdir()
             (project / "client.ts").write_text("const url = config.publicBaseUrl;\n", encoding="utf-8")
+            output.mkdir()
+            (output / "report.md").write_text("旧版报告", encoding="utf-8")
+            (output / "code-change-check-report.md").write_text("旧版报告", encoding="utf-8")
             contract = project / "contracts.md"
             contract.write_text("内部服务调用必须使用 internalBaseUrl，禁止使用 publicBaseUrl。\n", encoding="utf-8")
 
@@ -353,11 +356,14 @@ class ContractRulesIntegrationTest(unittest.TestCase):
             )
 
             evidence = (output / "evidence.json").read_text(encoding="utf-8")
-            report = (output / "report.md").read_text(encoding="utf-8")
+            report = (output / "report.html").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertIn("contract:contract-addressing", evidence)
-        self.assertIn("## 业务契约执行结果", report)
+        self.assertFalse((output / "report.md").exists())
+        self.assertFalse((output / "code-change-check-report.md").exists())
+        self.assertIn("业务契约执行结果", report)
+        self.assertIn("可交付评分矩阵", report)
 
     def test_main_does_not_extract_contract_inventory_when_contracts_disabled(self):
         self.tool.extract_semantic_inventory = lambda project: (_ for _ in ()).throw(
@@ -412,7 +418,7 @@ class ContractRulesIntegrationTest(unittest.TestCase):
             evidence = json.loads(
                 (output / "evidence.json").read_text(encoding="utf-8")
             )
-            report = (output / "report.md").read_text(encoding="utf-8")
+            report = (output / "report.html").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(evidence["business_contract_check"]["checked_contracts"], 1)
@@ -464,15 +470,15 @@ class ContractRulesIntegrationTest(unittest.TestCase):
             evidence = json.loads(
                 (output / "evidence.json").read_text(encoding="utf-8")
             )
-            report = (output / "report.md").read_text(encoding="utf-8")
+            report = (output / "report.html").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(evidence["audit_coverage"]["status"], "blocked")
         self.assertEqual(len(evidence["missing_referenced_contract_artifacts"]), 1)
         obligation = evidence["manual_review_obligations"][0]
         self.assertEqual(obligation["candidates"][0]["file"], "src/OverviewServiceImpl.java")
-        self.assertIn("## 审计覆盖质量闸门", report)
-        self.assertIn("## 必须人工核验的未检查契约", report)
+        self.assertIn("审计覆盖质量闸门", report)
+        self.assertIn("必须人工核验的未检查契约", report)
         self.assertIn("OverviewServiceImpl.java", report)
 
     def test_main_does_not_compare_contract_against_same_content_snapshot(self):
